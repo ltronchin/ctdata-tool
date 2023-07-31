@@ -1,0 +1,61 @@
+seed: 0
+exp_name:
+
+device:
+  cuda_device: cuda:0
+  gpu_num_workers: 32
+
+data:
+  dataset_name: RC
+
+  img_dir: ./data/raw/RC/
+  interim_dir: ./data/interim/
+  processed_dir: ./data/processed/
+  label_file: ./data/raw/RC/DATABASEV1.xls
+
+  classes:
+    "no_rc": 0
+    "rc": 1
+
+  dicom_tags:
+    - PatientID
+    - PatientName
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
+
+  preprocessing:
+    # resize
+    img_size: 256
+    interpolation: linear
+
+    # normalization and clip
+    range:
+      min: -1000 # -1200 # -1000
+      max: 2000 # 400 # 1000
+    upper_percentile:
+    lower_percentile:
+    to_255:
+
+    file_format: .tiff # .pkl
+
+model:
+  model_dir: ./models/10/multimodal # folder to save trained model
+
+trainer:
+
+reports:
+  reports_dir: "./reports/"
+  snap: True
