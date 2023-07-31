@@ -46,7 +46,6 @@ if __name__ == '__main__':
             print(f"Patient: {patient_dir}")
 
             # Convert DICOM to NIFTI 3D volume
-            # Create destination directory if not exist
             interim_dir_nifti = os.path.join(interim_dir, 'nifti_volumes')
             util_path.create_dir(interim_dir_nifti)
 
@@ -55,21 +54,6 @@ if __name__ == '__main__':
             # Open files
             seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
             ds_seg = pydicom.dcmread(seg_files[0])
-
-            # Available structures
-            structures = {}
-            for item in ds_seg.StructureSetROISequence:
-                structures[item.ROINumber] = item.ROIName
-
-            # For a given image IOD dataset with SOP Instance UID '1.2.3.4'...
-            roi_seq = ds_seg.ROIContourSequence
-            # roi_seq[0] -> first ROI
-            for contour in roi_seq[0].ContourSequence:
-                image_item = contour.ContourImageSequence[0]
-                #if image_item.ReferencedSOPInstanceUID == '1.2.3.4':
-                print('ROI Name:', structures[roi_seq[0].ReferencedROINumber])
-                print('Coordinates:', contour.ContourData)
-
 
             # Select idpatient
             ds = pydicom.dcmread(dicom_files[0])
@@ -85,7 +69,7 @@ if __name__ == '__main__':
             vol = dicom2nifti.dicom_series_to_nifti(patient_dir, output_file_nifti, reorient_nifti=True)  # The function dicom_series_to_nifti accepts the directory containing the slices to be included in .nii.gz volume reorient_nifti=False to mantain the orientation in DICOM file
             nifti_image = vol['NII']
             util_data.visualize_nifti(outdir=reports_dir_nifti, image=nifti_image.get_fdata(), opt=preprocessing)
-            data_tostats=nifti_image.get_fdata()
+            data_tostats = nifti_image.get_fdata()
 
             # Resize and normalize NIFTI images
             interim_dir_nifti_res_norm = os.path.join(interim_dir, f'nifti_volumes_{img_size}_norm')
@@ -96,13 +80,17 @@ if __name__ == '__main__':
             print("Output file: ", output_file_nifit_res_norm)
 
             # Read, resample and resize the volume
-            # If we want to resize from [512 x 512 x d] to [256 256 x d] and the pixelspacing in the source resolution
-            # is [1 1 3] we have to perform a respacing operation to [1/(512/256),  1/(512/256), 3]
+            # If we want to resize from [512 x 512 x d] to [256 256 x d] and the pixelspacing in the source resolution is [1 1 3] we have to perform a respacing operation to [1/(512/256),  1/(512/256), 3]
             nifti_image = util_data.resize(image=nifti_image, new_shape= (img_size, img_size,  nifti_image.shape[-1]), interpolation=interpolation)
             data = util_data.normalize(data=nifti_image.get_fdata(), opt=preprocessing)
             nifti_image = nib.Nifti1Image(data, affine=nifti_image.affine)
             nib.save(nifti_image, output_file_nifit_res_norm)
             util_data.visualize_nifti(outdir=reports_dir_nifti_resize, image=nifti_image.get_fdata())
+
+            # Save to 2D images
+            # todo @ltronchin
+            # todo save as .pkl
+            # todo save as .tiff
 
             df.loc[len(df)] = [patient_dir, output_file_nifti, output_file_nifit_res_norm, np.mean(data_tostats), np.median(data_tostats), np.min(data_tostats), np.max(data_tostats)]
 

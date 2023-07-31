@@ -15,13 +15,11 @@ from src.utils import util_data
 from src.utils import util_path
 from src.utils import util_dicom
 
-
-
 if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data.yaml') as file:
+    with open('./configs/prepare_data3d.yaml') as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
@@ -53,7 +51,6 @@ if __name__ == '__main__':
             print(f"Patient: {patient_dir}")
 
             # Convert DICOM to NIFTI 3D volume
-            # Create destination directory if not exist
             interim_dir_nifti = os.path.join(interim_dir, 'nifti_volumes')
             util_path.create_dir(interim_dir_nifti)
 
@@ -71,6 +68,12 @@ if __name__ == '__main__':
                 mask_dict = util_dicom.get_mask_dict(contour_datasets, patient_dir+"/CT.")
                 slice_orders = util_dicom.slice_order(patient_dir)
                 img_data, mask_data = util_dicom.get_img_mask_voxel(slice_orders, mask_dict, patient_dir+"/CT." )
+
+                # Create bounding box
+                # todo @fruffini
+                # boundind_box_body -> xlsx
+                # bounding_box_lungs -> xlsx
+
 
                 import matplotlib.pyplot as plt
 
