@@ -28,7 +28,24 @@ data:
     lower_percentile:
     to_255:
     file_format: .tiff # .pkl
-  dicom_tags: # todo cosa devo mettere qui? @ltronchin
+  dicom_tags:
+    - PatientID
+    - PatientName
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
 
 model:
   model_dir: ./models/10/multimodal # folder to save trained model
