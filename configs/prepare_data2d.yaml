@@ -28,6 +28,7 @@ data:
     lower_percentile:
     to_255:
     file_format: .tiff # .pkl
+  dicom_tags: # todo cosa devo mettere qui? @ltronchin
 
 model:
   model_dir: ./models/10/multimodal # folder to save trained model

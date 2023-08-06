@@ -15,7 +15,7 @@ if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data.yaml') as file:
+    with open('./configs/prepare_data2d.yaml') as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
@@ -63,6 +63,8 @@ if __name__ == '__main__':
 
             df_stats.loc[len(df_stats)] = pixel_statistics
 
+    if not os.path.exists(interim_dir):
+        os.makedirs(interim_dir)
     df_stats.to_excel(os.path.join(interim_dir, 'pixels_info.xlsx'), index=False)
 
     print("May the force be with you")

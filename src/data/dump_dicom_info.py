@@ -13,14 +13,14 @@ if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data.yaml') as file:
+    with open('./configs/prepare_data2d.yaml') as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
     img_dir = cfg['data']['img_dir']
     label_file = cfg['data']['label_file']
     interim_dir = cfg['data']['interim_dir']
-    dicom_tags = cfg['data']['dicom_tags']
+    #dicom_tags = cfg['data']['dicom_tags']
 
     # Load label file
     df_labels = pd.read_excel(label_file)
@@ -65,6 +65,8 @@ if __name__ == '__main__':
                 print(f'Error in patient: {patient}')
 
     # Save DataFrame to a CSV file
+    if not os.path.exists(interim_dir):
+        os.makedirs(interim_dir)
     df.to_excel(os.path.join(interim_dir, 'patients_info.xlsx'), index=False)
 
 print("May the force be with you")

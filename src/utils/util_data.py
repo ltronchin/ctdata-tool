@@ -14,6 +14,12 @@ import matplotlib.pyplot as plt
 from src.utils import util_path
 from src.utils import util_sitk
 
+
+def adaptive_interpolation2d(img, ds_seg, interpolation="bilinear"):
+    pass
+
+
+
 def visualize_nifti(outdir, image, opt=None):
 
     print("Image shape: ", image.shape)

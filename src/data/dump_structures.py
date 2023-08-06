@@ -18,7 +18,7 @@ if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data.yaml') as file:
+    with open('./configs/prepare_data2d.yaml') as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
@@ -81,6 +81,9 @@ if __name__ == '__main__':
             except:
                 print("No segmentation file found")
     df = pd.DataFrame(data)
+    if not os.path.exists(reports_dir):
+        os.makedirs(reports_dir)
+
     df.to_excel(os.path.join(reports_dir, 'structures.xlsx'), index=False)
 
     print("May the force be with you")
