@@ -13,14 +13,17 @@ if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data2d.yaml') as file:
+    with open('./configs/prepare_data2d_RC.yaml') as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
     img_dir = cfg['data']['img_dir']
     label_file = cfg['data']['label_file']
-    interim_dir = cfg['data']['interim_dir']
-    #dicom_tags = cfg['data']['dicom_tags']
+    dataset_name = cfg['data']['dataset_name']
+    interim_dir =os.path.join(cfg['data']['interim_dir'], dataset_name)
+    processed_dir = os.path.join(cfg['data']['processed_dir'], dataset_name)
+    reports_dir = os.path.join(cfg['reports']['reports_dir'], dataset_name)
+    dicom_tags = cfg['data']['dicom_tags']
 
     # Load label file
     df_labels = pd.read_excel(label_file)

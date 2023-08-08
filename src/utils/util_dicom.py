@@ -1,5 +1,6 @@
 import pydicom as dicom
 import numpy as np
+from pydicom.errors import InvalidDicomError
 from scipy.sparse import csc_matrix
 import matplotlib.pyplot as plt
 import scipy.ndimage as scn
@@ -156,8 +157,7 @@ def slice_order(path):
     for s in os.listdir(path):
         try:
             f = dicom.read_file(path + '/' + s)
-
-            f.ImagePositionPatient# to ensure not to read contour file
+            f.ImagePositionPatient # to ensure not to read contour file
             assert f.Modality != 'RTDOSE'
             slices.append(f)
         except:
