@@ -13,6 +13,76 @@ import math
 
 # https://github.com/KeremTurgutlu/dicom-contour/blob/master/dicom_contour/contour.py
 
+def set_padding_to_air(image, padding_value=-1000, change_value="lower", new_value=-1000):
+    """
+    This function sets the padding (contour of the dicom image) to the padding value. It trims all the values below the
+    padding value and sets them to this value.
+
+    Parameters
+    ----------
+    image: numpy.array
+        Image to modify.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    image: numpy.array
+        Modified image.
+
+    """
+
+    trim_map = image < padding_value
+    options = {"greater": ~trim_map, "lower": trim_map}
+    image[options[change_value]] = new_value
+
+    return image
+
+
+def transform_to_HU(slice, intercept, slope, padding_value=-1000, change_value="lower", new_value=-1000):
+    """
+    This function transforms to Hounsfield units all the images passed.
+
+    Parameters
+    ----------
+    slice: numpy.Array
+        List of metadatas of the slices where to gather the information needed in the transformation.
+    intercept: scalar number
+        Intercept of the slice.
+    slope: scalar number
+        Slope of the slice.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    images: numpy array
+        transformed slice in HU with the padding set to the padding value.
+    """
+    intercept = np.float32(intercept)
+    slope = np.float32(slope)
+    slice = slice.astype("float32")
+
+    if slope != 1:
+
+        slice = slope * slice.astype("float32")
+        slice = slice.astype("float32")
+    slice += np.float32(intercept)
+    # TODO qui è necessario fare il riaggiustamento per i pazienti con l'intercept sballata @ltrochin
+    # Padding to air all the values below
+    slice_HU_padded = set_padding_to_air(image=slice,
+                                      padding_value=padding_value,
+                                      change_value=change_value,
+                                      new_value=new_value)
+    return slice_HU_padded
+
+
+
+
 def parse_dicom_file(filename):
     """Parse the given DICOM filename
     :param filename: filepath to the DICOM file to parse
@@ -166,6 +236,10 @@ def slice_order(path):
     slice_dict = {s.SOPInstanceUID: s.ImagePositionPatient[-1] for s in slices}
     ordered_slices = sorted(slice_dict.items(), key=operator.itemgetter(1))
     return ordered_slices
+
+
+
+
 
 def get_img_mask_voxel(slice_orders, mask_dict, image_path):
     """

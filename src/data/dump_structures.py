@@ -1,7 +1,7 @@
 import sys
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
-
+import re
 import os
 import yaml
 import numpy as np
@@ -61,23 +61,30 @@ if __name__ == '__main__':
             ds = pydicom.dcmread(dicom_files[0])
             # Open files
             seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
+            if 'Girs' in patient_dir:
+                print("Macario")
             try:
                 # https://github.com/pydicom/pydicom/issues/961
                 ds_seg = pydicom.dcmread(seg_files[0])
 
                 # Available structures
                 structures = {}
+
+                pattern = re.compile('(^lung[0-9._\s])', re.IGNORECASE)
+
                 for item in ds_seg.StructureSetROISequence:
                     name = item.ROIName
-                    if "polmo" in name.lower():
+                    if "polmone " in name.lower():
                         structures[item.ROINumber] = item.ROIName
-                    elif "lung" in name.lower():
+                    elif pattern.search(name):
                         structures[item.ROINumber] = item.ROIName
                     elif "corpo" in name.lower():
                         structures[item.ROINumber] = item.ROIName
                     elif "body" in name.lower():
                         structures[item.ROINumber] = item.ROIName
-                    elif "ctv" in name.lower():
+                    elif re.search("^CTV[0-9]{0,1}", name.upper())  is not None:
+                        structures[item.ROINumber] = item.ROIName
+                    elif "external" in name.lower():
                         structures[item.ROINumber] = item.ROIName
                     else:
                         continue
@@ -88,7 +95,8 @@ if __name__ == '__main__':
                 # Add structures to dataframe
                 data.append({'patient_dir': patient_dir, 'structures': structures})
 
-            except:
+            except Exception as e:
+                print(e)
                 print("No segmentation file found")
     df = pd.DataFrame(data)
     if not os.path.exists(interim_dir):

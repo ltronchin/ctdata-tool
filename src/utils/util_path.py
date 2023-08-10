@@ -1,7 +1,114 @@
 import os
 import ntpath
+import shutil
 from pathlib import Path
 import glob
+
+
+
+
+
+
+def replace_existing_path(path, force=False, create=True, **kwargs):
+    """
+    This function, based on the 'force' parameter, deletes an existing path.
+    Then, based on the 'create' parameter, if the path points to a folder, it creates a new one.
+
+    Parameters
+    ----------
+    path: string
+        Path of the file/folder to replace.
+    force: bool, default False
+        A boolean value to erase or not an existing path.
+    create: bool, default True
+        A boolean value to create a new folder when deleted.
+    kwargs:
+        Keyword arguments added for compatibility.
+
+    Returns
+    -------
+        None
+
+    """
+
+    # CHECK IF THE PATH EXISTS
+    exists = os.path.exists(path)
+
+    _, file_name = os.path.split(path)
+
+    is_file = "." in file_name
+    if exists and not is_file:
+        if is_file and exists:
+            os.remove(path)
+        else:
+            if force or exists:
+                shutil.rmtree(path)
+                os.makedirs(path)
+            else:
+                os.makedirs(path)
+    else:
+        os.makedirs(path)
+
+
+
+
+def make_patient_folders(patient_ID, save_path, dataset_name, extension='tiff', force=False, create=True):
+    """
+    This function creates the folders where to save the info of a single patient.
+
+    Parameters
+    ----------
+    patient_ID: string
+        ID of the patient.
+    save_path: string
+        Path of the folder where to save the files.
+    dataset_name: string
+        Name of the database (e.g., CLARO_prospettico, CLARO_retrospettivo)
+    force: bool, default False
+        A boolean value to define whether to delete or not an existing folder.
+    create: bool, default True
+        A boolean value to define whether to create or not a folder not existing.
+    type_of_rois: string
+        Type of the rois to save (e.g., liver, lesion, etc.).
+
+    Returns
+    -------
+    paths_dict: dict
+        Dict of paths to the folders of the patient.
+
+    """
+    # Create the patient directory
+    patient_path = os.path.join(save_path, patient_ID)
+    replace_existing_path(patient_path, force=force, create=create)
+
+    # Create the CT slices directory
+    if extension == 'tiff':
+        patient_images_dir_path = os.path.join(patient_path, "CT_2D")
+        replace_existing_path(patient_images_dir_path, force=force, create=create)
+    else:
+        patient_images_dir_path = os.path.join(patient_path, "CT_3D")
+        replace_existing_path(patient_images_dir_path, force=force, create=create)
+
+    # Mask directory
+    patient_masks_dir_path = os.path.join(patient_path, "Masks_3D")
+    replace_existing_path(patient_masks_dir_path, force=force, create=create)
+
+
+
+
+    # Create the Roi mask directory
+    # todo patient_masks_dir_path = os.path.join(patient_path, f"{type_of_rois}_masks")
+    #  replace_existing_path(patient_masks_dir_path, force=force, create=create)
+
+    return {'patient_path': patient_path, 'image': patient_images_dir_path, 'masks': patient_masks_dir_path}
+
+
+
+
+
+
+
+
 
 def create_dir(outdir): # function to create directory
     if not os.path.exists(outdir):
