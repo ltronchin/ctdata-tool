@@ -187,15 +187,9 @@ def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_plana
     # Set padding to air
     if not is_mask:
         set_padding_to_air(volume_output, padding_value=-1000, change_value="lower", new_value=-1000)
+    else:
+        return volume_output.astype(np.uint8)
 
-    return volume_output
-
-    volume = set_padding_to_air(volume)
-
-    if mask_presence:
-        mask_volume = v_interpolate_slice[normalize_volume](metadatas, mask_volume, index_z_coord) > 0.5
-
-        return volume, mask_volume
 
 
 def create_gif(volume, save_file):

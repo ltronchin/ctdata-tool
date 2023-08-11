@@ -41,7 +41,7 @@ def replace_existing_path(path, force=False, create=True, **kwargs):
         if is_file and exists:
             os.remove(path)
         else:
-            if force or exists:
+            if force:
                 shutil.rmtree(path)
                 os.makedirs(path)
             else:
