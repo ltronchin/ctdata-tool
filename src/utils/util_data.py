@@ -14,7 +14,7 @@ from src.utils import util_sitk
 from src.utils.util_dicom import set_padding_to_air
 import struct
 import numpy as np
-
+import zipfile
 
 def write_idx_file(volumes_dict, volumes_file):
     num_volumes = len(volumes_dict)
@@ -156,8 +156,7 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
     return interpolated_slice
 
 
-def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,
-                         z_spacing=1, is_mask=False):
+def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,  z_spacing=1, is_mask=False):
     """
     This function interpolates the slices of a patient.
 
@@ -290,7 +289,7 @@ def normalize(data, opt):
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-def iter_volumes(source_dir):
+def iter_volumes(source_dir, transpose_img=False):
     patients_list = glob.glob(os.path.join(source_dir, "*"))
 
     def iterate_images():
@@ -306,8 +305,7 @@ def iter_volumes(source_dir):
                 img = fdata[:, :, d]  # based on depth index (d): 0000->0128
                 if transpose_img:  # fix orientation
                     img = np.transpose(img, [1, 0])
-                yield dict(img=img, name=f"{patient_name:s}_{d:05d}", folder_name=f"{patient_name:s}", depth_index=d,
-                           total_depth=depth)
+                yield dict(img=img, name=f"{patient_name:s}_{d:05d}", folder_name=f"{patient_name:s}", depth_index=d,   total_depth=depth)
 
             if idx >= len(patients_list) - 1:
                 break
@@ -332,3 +330,104 @@ def to_file(source: str, dest: str, file_format, is_visualize=True):
         if random.uniform(0, 1) > 0.1:
             if is_visualize:
                 visualize(img)
+
+def write_to_zip(
+        source:                     str,
+        dest:                      str,
+        dataset:                    str = "RC",
+        max_patients:               int = 100000,
+):
+
+    def add_to_zip(zipObj, patient):
+        files = glob.glob(os.path.join(patient, "*.pickle"))
+        if len(files) == 0:
+            files = glob.glob(os.path.join(patient, "*.png"))
+
+        print(f">> Writing {patient} to zip file")
+        for file in files:
+            filename = os.path.join(
+                util_path.get_filename_without_extension(patient),
+                util_path.get_filename(file),
+            )
+            # Add file to zip
+            zipObj.write(file, filename)
+
+    # Get all patients in temp folder.
+    patients = glob.glob(os.path.join(source, "*[!json]"))
+
+    # Get only the names of patients.
+    patients = [util_path.get_filename_without_extension(patient) for patient in patients]
+    assert len(patients) > 0
+
+    # Create a basename depending on <dataset>, <num_patient>
+    max_patients = min(max_patients, len(patients))
+    basename = f"{dataset}-num-{max_patients:d}"
+
+    # Shuffle and take max_patients samples from dataset.
+    patients = sorted(patients)
+    random.Random(max_patients).shuffle(patients)  # comment this line if you don't want to change the order fo the patients across the experiments
+    sample_patients = patients[:max_patients]
+
+    # Init zip file.
+    out_path = os.path.join(dest, f"{basename}.zip",)
+
+    # Write to zip
+    with zipfile.ZipFile(out_path, "w") as zipObj:
+        for p in sample_patients:
+            patient_path = os.path.join(source, p)
+            add_to_zip(zipObj, patient_path)
+
+def open_dataset_patient(source, transpose_img):
+    if os.path.isdir(source):
+        return iter_volumes(source, transpose_img)
+    elif os.path.isfile(source):
+        assert False, "unknown archive type"
+    else:
+        error(f"Missing input file or directory: {source}")
+
+def to_pickle(
+        source: str,
+        dest: str,
+        transpose_img: bool = True,
+        is_overwrite: bool = False,
+        is_visualize: bool =False
+):
+    def visualize(x):
+        plt.imshow(x, cmap="gray", vmin=x.min(), vmax=x.max())
+        plt.show()
+
+    def write_pickle(data, path):
+        with open(path, 'wb') as handle:
+            pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # Open normalized folder.
+    num_files, input_iter = open_dataset_patient(source, transpose_img) # Core function.
+
+    # Create a temp folder to be save into zipfile
+    temp = os.path.join(dest, "temp")
+
+    if os.path.isdir(temp) and is_overwrite:
+        print(f"Removing {temp}")
+        shutil.rmtree(temp)
+    util_path.create_dir(temp)
+
+    for idx, image in enumerate(input_iter):
+        folder_name = image["folder_name"] # patient name
+        idx_name = image["name"]
+        archive_fname = f"{folder_name}/{idx_name}.pickle"
+        util_path.create_dir(os.path.join(temp, f"{folder_name}"))
+        out_path = os.path.join(temp, archive_fname)
+
+        img = image["img"]
+
+        # Transform may drop images.
+        if img is None:
+            break
+
+        # Sanity check
+        if random.uniform(0, 1) > 0.9:
+            if is_visualize:
+                visualize(img)
+
+        # Save the dict as a pickle.
+        write_pickle(img, out_path)

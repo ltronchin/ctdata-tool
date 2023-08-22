@@ -20,4 +20,4 @@ dependencies:
   - SimpleITK
   - nilearn
   - xlrd
-  
+  - imageio

@@ -36,28 +36,16 @@ def elaborate_patient_volume(patient_dir, cfg):
 
     # Parameters
     dataset_name = cfg['data']['dataset_name']
-    img_dir = cfg['data']['img_dir']
-    label_file = cfg['data']['label_file']
-
     interim_dir =os.path.join(cfg['data']['interim_dir'], dataset_name)
     processed_dir = os.path.join(cfg['data']['processed_dir'], dataset_name)
-    reports_dir = os.path.join(cfg['reports']['reports_dir'], dataset_name)
-    img_dir = os.path.join(img_dir, dataset_name)
 
     # Patient Information Dicom
     patients_info_file = os.path.join(interim_dir, 'patients_info.xlsx')
     patients_info_df = pd.read_excel(patients_info_file).set_index('PatientID')
 
     # RTstruct file
-
     rtstruct_file = os.path.join(interim_dir, 'structures.xlsx')
     rtstruct_df = pd.read_excel(rtstruct_file).set_index('patient_dir')
-
-
-    preprocessing = cfg['data']['preprocessing']
-    img_size = preprocessing['img_size']
-    interpolation = preprocessing['interpolation']
-
 
     try:
         if os.path.isdir(patient_dir):
@@ -74,8 +62,7 @@ def elaborate_patient_volume(patient_dir, cfg):
             assert patient_fname is not None, "Patient ID not found"
 
             # Create patient folders
-            patient_folders = util_path.make_patient_folders(patient_fname, processed_dir, dataset_name,
-                                                             extension='tiff', force=True, create=True)
+            patient_folders = util_path.make_patient_folders(patient_fname, processed_dir, dataset_name,  extension='tiff', force=True, create=True)
 
             # Get ROIs from segmentation file
             struct_info = eval(rtstruct_df.loc[patient_dir]['structures'])
@@ -84,9 +71,7 @@ def elaborate_patient_volume(patient_dir, cfg):
             dicom_info_patient = patients_info_df.loc[patient_fname].to_frame()
 
             # Create mask volume for each ROI
-            img_voxel, metadatas, rois_dict = util_contour.get_slices_and_masks(ds_seg,
-                                                                                roi_names=list(struct_info.values()),
-                                                                                patient_dir=patient_dir)
+            img_voxel, metadatas, rois_dict = util_contour.get_slices_and_masks(ds_seg, roi_names=list(struct_info.values()),  patient_dir=patient_dir)
             rois_dict_backup = rois_dict.copy()
             # Obtain Bounding Box for Lungs ROIs and Body ROI
             rois_dict = rois_dict_backup.copy()
@@ -271,6 +256,5 @@ if __name__ == '__main__':
 
     # Parallelize the elaboration of each patient
     pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg)
-
 
     print("May the force be with you")
