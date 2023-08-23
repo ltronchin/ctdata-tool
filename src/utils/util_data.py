@@ -9,9 +9,7 @@ import random
 from nilearn.image import new_img_like
 import nibabel as nib
 import matplotlib.pyplot as plt
-from src.utils import util_path
-from src.utils import util_sitk
-from src.utils.util_dicom import set_padding_to_air
+from src.utils import util_path, util_sitk
 import struct
 import numpy as np
 
@@ -105,6 +103,72 @@ def load_volumes_with_names(file_path):
 
 
 
+
+
+def set_padding_to_air(image, padding_value=-1000, change_value="lower", new_value=-1000):
+    """
+    This function sets the padding (contour of the dicom image) to the padding value. It trims all the values below the
+    padding value and sets them to this value.
+
+    Parameters
+    ----------
+    image: numpy.array
+        Image to modify.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    image: numpy.array
+        Modified image.
+
+    """
+
+    trim_map = image < padding_value
+    options = {"greater": ~trim_map, "lower": trim_map}
+    image[options[change_value]] = new_value
+
+    return image
+
+
+
+
+def transform_to_HU(slice, intercept, slope, padding_value=-1000, change_value="lower", new_value=-1000):
+    """
+    This function transforms to Hounsfield units all the images passed.
+
+    Parameters
+    ----------
+    slice: numpy.Array
+        List of metadatas of the slices where to gather the information needed in the transformation.
+    intercept: scalar number
+        Intercept of the slice.
+    slope: scalar number
+        Slope of the slice.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    images: numpy array
+        transformed slice in HU with the padding set to the padding value.
+    """
+    intercept = np.float32(intercept)
+    slope = np.float32(slope)
+    slice = slice.astype("float32")
+
+    if slope != 1:
+
+        slice = slope * slice.astype("float32")
+        slice = slice.astype("float32")
+    slice += np.float32(intercept)
+
+    return slice
+
 def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1]):
     """
     This function interpolates a slice of a patient, given its metadata and the index of the z coordinate, in order to
@@ -157,7 +221,7 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
 
 
 def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,
-                         z_spacing=1, is_mask=False):
+                         z_spacing=1, is_mask=False, **kwargs):
     """
     This function interpolates the slices of a patient.
 
@@ -186,13 +250,28 @@ def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_plana
     # TODO OPTION TO INTERPOLATE Z
     # Set padding to air
     if not is_mask:
-        set_padding_to_air(volume_output, padding_value=-1000, change_value="lower", new_value=-1000)
+        return volume_output.astype(np.float32)
     else:
         return volume_output.astype(np.uint8)
 
+def clip_slice_window(slice, level, window):
+    """
+   Level is the
+   Function to display an image slice
+   Input is a numpy 2D array
 
+    Parameters:
+    :param slice: input 2D array
+    :param level: The Window Level (WL) refers to the window centre or midpoint HU value that is represented on the window setting.
+    :param window: The window Width (WW) is the measure of the range of CT numbers that a CT image contains.
 
-def create_gif(volume, save_file):
+   """
+    max = level + (window / 2)
+    min = level - (window / 2)
+    slice = slice.clip(min, max)
+    return slice
+
+def create_gif(volume, save_file, is_mask=False, fps=10):
     # Assume your CT volume is stored as a 3D NumPy array called 'volume'
     # The dimensions are (depth, height, width)
 
@@ -205,17 +284,19 @@ def create_gif(volume, save_file):
     # Iterate over the slices and convert them to RGB images (for visualization purposes)
     for slice in slices:
         # Normalize the slice to the range [0, 255]
-        # slice_normalized = ((slice - np.min(slice)) / (np.max(slice) - np.min(slice))) * 255
-        slice = slice > 0.5
+
+        slice = ((slice - np.min(slice)) / (np.max(slice) - np.min(slice))) * 255 if not is_mask else slice
+
+        slice = slice > 0.5 if is_mask else slice
         # Convert the 2D slice to an RGB image (grayscale)
-        slice_rgb = np.repeat(slice[:, :, np.newaxis], 3, axis=2).astype(int) * 255
+        slice_rgb = np.repeat(slice[:, :, np.newaxis], 3, axis=2)
 
         # Append the RGB image to the frames list
         frames.append(slice_rgb.astype(np.uint8))
 
     # Save the frames as a GIF file
 
-    imageio.mimsave('./figures/ct_volume_{}.gif'.format(save_file), frames, duration=10)
+    imageio.mimsave('./figures/ct_volume_{}.gif'.format(save_file), frames, duration=fps)
 
 
 def visualize_nifti(outdir, image, opt=None):

@@ -1,27 +1,23 @@
 from pandarallel import pandarallel
-from math import sin
 
 
-import re
-import shutil
 import sys
-from copy import deepcopy
-
-from src.utils.util_contour import get_maximum_bbox_over_slices
-
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
 
+
+import re
+from copy import deepcopy
 import os
 import yaml
 import pandas as pd
+import numpy as np
+import argparse
 import glob
 import pydicom
 from src.utils import util_path, util_data, util_contour
-import numpy as np
-import argparse
 
-
+# Parser
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
                        help='configuration file path', default='./configs/prepare_data2d_RC.yaml')
@@ -36,29 +32,19 @@ def elaborate_patient_volume(patient_dir, cfg):
 
     # Parameters
     dataset_name = cfg['data']['dataset_name']
-    img_dir = cfg['data']['img_dir']
-    label_file = cfg['data']['label_file']
 
     interim_dir =os.path.join(cfg['data']['interim_dir'], dataset_name)
-    processed_dir = os.path.join(cfg['data']['processed_dir'], dataset_name)
-    reports_dir = os.path.join(cfg['reports']['reports_dir'], dataset_name)
-    img_dir = os.path.join(img_dir, dataset_name)
+    mask_dir = os.path.join(interim_dir, '3D_masks')
 
     # Patient Information Dicom
     patients_info_file = os.path.join(interim_dir, 'patients_info.xlsx')
     patients_info_df = pd.read_excel(patients_info_file).set_index('PatientID')
 
     # RTstruct file
-
     rtstruct_file = os.path.join(interim_dir, 'structures.xlsx')
     rtstruct_df = pd.read_excel(rtstruct_file).set_index('patient_dir')
 
-
-    preprocessing = cfg['data']['preprocessing']
-    img_size = preprocessing['img_size']
-    interpolation = preprocessing['interpolation']
-
-
+    # Create patient folders
     try:
         if os.path.isdir(patient_dir):
             # Load idpatient from dicom file
@@ -74,8 +60,12 @@ def elaborate_patient_volume(patient_dir, cfg):
             assert patient_fname is not None, "Patient ID not found"
 
             # Create patient folders
-            patient_folders = util_path.make_patient_folders(patient_fname, processed_dir, dataset_name,
-                                                             extension='tiff', force=True, create=True)
+
+
+            # Create the patient directory for masks
+            patient_path = os.path.join(mask_dir, patient_fname)
+            util_path.create_replace_existing_path(patient_path, force=True, create=True)
+
 
             # Get ROIs from segmentation file
             struct_info = eval(rtstruct_df.loc[patient_dir]['structures'])
@@ -88,8 +78,6 @@ def elaborate_patient_volume(patient_dir, cfg):
                                                                                 roi_names=list(struct_info.values()),
                                                                                 patient_dir=patient_dir)
             rois_dict_backup = rois_dict.copy()
-            # Obtain Bounding Box for Lungs ROIs and Body ROI
-            rois_dict = rois_dict_backup.copy()
             # Elaborate masks
             dict_final_masks = {}
             voxel_final_lungs_and_lesion = np.zeros(
@@ -183,14 +171,14 @@ def elaborate_patient_volume(patient_dir, cfg):
             # Save bounding box report INTERPOLATED BODY
             bounding_box_interpolated_df = pd.DataFrame(dict_bounding_box_body_interpolated).T.drop(
                 columns=['left', 'right']).rename(columns={'max': 'bbox_body'})
-            maximum_bbox_body = get_maximum_bbox_over_slices(bounding_box_interpolated_df.loc[:, 'bbox_body'].to_list())
+            maximum_bbox_body = util_contour.get_maximum_bbox_over_slices(bounding_box_interpolated_df.loc[:, 'bbox_body'].to_list())
             bounding_box_interpolated_df.loc[:, 'max_bbox_body'] = [maximum_bbox_body for i in range(
                 len(dict_bounding_box_body_interpolated))]
 
             # Save bounding box report INTERPOLATED LUNGS
             bounding_box_lungs_interpolated_df = pd.DataFrame(dict_bounding_box_lungs_interpolated).T.rename(
                 columns={'max': 'bbox_lungs', 'right': 'right_lung', 'left': 'left_lung'})
-            maximum_bbox_lungs = get_maximum_bbox_over_slices(
+            maximum_bbox_lungs = util_contour.get_maximum_bbox_over_slices(
                 [value for value in bounding_box_lungs_interpolated_df.loc[:, 'bbox_lungs'].to_list() if
                  not sum(value) == 0])
             bounding_box_lungs_interpolated_df.loc[:, 'max_bbox_lungs'] = [maximum_bbox_lungs for i in range(
@@ -199,7 +187,7 @@ def elaborate_patient_volume(patient_dir, cfg):
             # Save bounding box report INTERPOLATED LUNGS + LESIONS
             bounding_box_ll_interpolated_df = pd.DataFrame(dict_bounding_box_ll_interpolated).T.rename(
                 columns={'max': 'bbox_ll', 'right': 'right_ll', 'left': 'left_ll'})
-            maximum_bbox_ll = get_maximum_bbox_over_slices(
+            maximum_bbox_ll = util_contour.get_maximum_bbox_over_slices(
                 [value for value in bounding_box_ll_interpolated_df.loc[:, 'bbox_ll'].to_list() if not sum(value) == 0])
             bounding_box_ll_interpolated_df.loc[:, 'max_bbox_ll'] = [maximum_bbox_ll for i in range(
                 len(dict_bounding_box_ll_interpolated))]
@@ -209,7 +197,7 @@ def elaborate_patient_volume(patient_dir, cfg):
                 [bounding_box_interpolated_df, bounding_box_lungs_interpolated_df, bounding_box_ll_interpolated_df],
                 axis=1)
             df_interpolated.to_excel(
-                os.path.join(patient_folders['patient_path'], f'bboxes_interpolated_{patient_fname}.xlsx'))
+                os.path.join(patient_path, f'bboxes_interpolated_{patient_fname}.xlsx'))
 
             # ----------------------- Original -------------------------- #
             # GET lung/body BBOX original
@@ -220,13 +208,13 @@ def elaborate_patient_volume(patient_dir, cfg):
             # Save bounding box report BODY
             bounding_box_df = pd.DataFrame(dict_bounding_box_body).T.drop(columns=['left', 'right']).rename(
                 columns={'max': 'bbox_body'})
-            maximum_bbox_body = get_maximum_bbox_over_slices(bounding_box_df.loc[:, 'bbox_body'].to_list())
+            maximum_bbox_body = util_contour.get_maximum_bbox_over_slices(bounding_box_df.loc[:, 'bbox_body'].to_list())
             bounding_box_df.loc[:, 'max_bbox_body'] = [maximum_bbox_body for i in range(len(dict_bounding_box_body))]
 
             # Save bounding box report LUNGS
             bounding_box_lungs_df = pd.DataFrame(dict_bounding_box_lungs).T.rename(
                 columns={'max': 'bbox_lungs', 'right': 'right_lung', 'left': 'left_lung'})
-            maximum_bbox_lungs = get_maximum_bbox_over_slices(
+            maximum_bbox_lungs = util_contour.get_maximum_bbox_over_slices(
                 [value for value in bounding_box_lungs_df.loc[:, 'bbox_lungs'].to_list() if not sum(value) == 0])
             bounding_box_lungs_df.loc[:, 'max_bbox_lungs'] = [maximum_bbox_lungs for i in
                                                               range(len(dict_bounding_box_lungs))]
@@ -234,16 +222,16 @@ def elaborate_patient_volume(patient_dir, cfg):
             # Save bounding box report LUNGS + LESIONS
             bounding_box_ll_df = pd.DataFrame(dict_bounding_box_ll).T.rename(
                 columns={'max': 'bbox_ll', 'right': 'right_ll', 'left': 'left_ll'})
-            maximum_bbox_ll = get_maximum_bbox_over_slices(
+            maximum_bbox_ll = util_contour.get_maximum_bbox_over_slices(
                 [value for value in bounding_box_ll_df.loc[:, 'bbox_ll'].to_list() if not sum(value) == 0])
             bounding_box_ll_df.loc[:, 'max_bbox_ll'] = [maximum_bbox_ll for i in range(len(dict_bounding_box_ll))]
 
             # Concatenate bounding box report for BODY and LUNGS
             df = pd.concat([bounding_box_df, bounding_box_lungs_df, bounding_box_ll_df], axis=1)
-            df.to_excel(os.path.join(patient_folders['patient_path'], f'bboxes_{patient_fname}.xlsx'))
+            df.to_excel(os.path.join(patient_path, f'bboxes_{patient_fname}.xlsx'))
 
             # Save volumes
-            volumes_file = os.path.join(patient_folders['masks'], f'Masks_interpolated_{patient_fname}_.pkl.gz')
+            volumes_file = os.path.join(patient_path, f'Masks_interpolated_{patient_fname}_.pkl.gz')
             util_data.save_volumes_with_names(dict_final_masks_interpolated, volumes_file)
 
     except AssertionError as e:
@@ -256,9 +244,6 @@ if __name__ == '__main__':
     # Config file
     print("Upload configuration file")
     config_file = args.config
-
-
-
     with open(config_file) as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
@@ -266,6 +251,7 @@ if __name__ == '__main__':
     img_dir = cfg['data']['img_dir']
     dataset_name = cfg['data']['dataset_name']
     img_dir = os.path.join(img_dir, dataset_name)
+
     # List all patients in the source directory
     patients_list = glob.glob(os.path.join(img_dir, "*")) # patient folders
 
