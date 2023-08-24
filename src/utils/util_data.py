@@ -14,7 +14,7 @@ from src.utils import util_sitk
 from src.utils.util_dicom import set_padding_to_air
 import struct
 import numpy as np
-import zipfile
+
 
 def write_idx_file(volumes_dict, volumes_file):
     num_volumes = len(volumes_dict)
@@ -156,7 +156,8 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
     return interpolated_slice
 
 
-def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,  z_spacing=1, is_mask=False):
+def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,
+                         z_spacing=1, is_mask=False):
     """
     This function interpolates the slices of a patient.
 
@@ -289,7 +290,7 @@ def normalize(data, opt):
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-def iter_volumes(source_dir, transpose_img=False):
+def iter_volumes(source_dir):
     patients_list = glob.glob(os.path.join(source_dir, "*"))
 
     def iterate_images():
@@ -305,7 +306,8 @@ def iter_volumes(source_dir, transpose_img=False):
                 img = fdata[:, :, d]  # based on depth index (d): 0000->0128
                 if transpose_img:  # fix orientation
                     img = np.transpose(img, [1, 0])
-                yield dict(img=img, name=f"{patient_name:s}_{d:05d}", folder_name=f"{patient_name:s}", depth_index=d,   total_depth=depth)
+                yield dict(img=img, name=f"{patient_name:s}_{d:05d}", folder_name=f"{patient_name:s}", depth_index=d,
+                           total_depth=depth)
 
             if idx >= len(patients_list) - 1:
                 break

@@ -6,13 +6,54 @@ from src.utils import util_dicom
 import cv2
 
 
-
-def Volume_mask_and_or(volume_one, volume_two, OR=True):
+def Volume_mask_and_original(volume_original, volume_mask, fill=-1000):
     """
-    This function returns the mask of the union or the intersection of two volumes.
+    This function returns the mask of the union or the intersection of two volumes: original and mask.
+    :param volume_original: numpy array of the original volume
+    :param volume_mask: numpy array of the mask volume
+    :param fill: value to fill the empty slice
+    :return: numpy array of the mask of and intersection of the two volumes
+    """
+    volume_out = np.zeros_like(volume_original)
+    for k in range(volume_original.shape[2]):
 
-        :param volume_one: numpy array of the first volume
-        :param volume_two: numpy array of the second volume
+        slice_or = volume_original[:, :, k]
+        slice_mask = volume_mask[:, :, k]
+        slice_mask = np.array(slice_mask, dtype=bool)
+        # AND between the slice and the mask
+        slice_or_and_mask = slice_or * slice_mask
+        # Empty slice filled by minimum value of original volume
+        empty_slice = np.ones_like(slice_or) * fill
+        # Negative slice of the mask
+        negative_slice_or_and_empty = (~slice_mask) * empty_slice
+        # Union between the AND slice and the negative slice
+        negative_slice_mask = slice_or_and_mask + negative_slice_or_and_empty
+        volume_out[:, :, k] = negative_slice_mask
+    return volume_out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def Volume_mask_and_or_mask(mask_one, mask_two, OR=True):
+    """
+    This function returns the mask of the union or the intersection of two volumes mask.
+
+        :param mask_one: numpy array of the first volume
+        :param mask_two: numpy array of the second volume
         :param OR: boolean, if True, the function returns the union of the two volumes, if False, the function returns the intersection of the two volumes
 
         :return: numpy array of the mask of the union or the intersection of the two volumes
@@ -32,7 +73,7 @@ def get_slices_and_masks(ds_seg, roi_names=[], patient_dir=str):
     Patient Image Position inside the dicom metadata.
     :param patient_dir: path to the patient directory
     :param ds_seg: dicom dataset of the segmentation file
-    :param roi_names: list of the roi names to extract
+    :param roi_names: list of the roi names to extract, if roi_names is empty, no roi will be extracted
     :return: img_voxel: img_voxel: list of all the array slices,
              metadatas: ordered list of the dicom metadata,
              voxel_by_rois: dictionary of the ordered mask voxel for each roi

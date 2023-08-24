@@ -22,8 +22,14 @@ import nibabel as nib
 
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
-argparser.add_argument('-c', '--config',  help='configuration file path', default='./configs/prepare_data2d_RC.yaml')
+argparser.add_argument('-c', '--config',
+                       help='configuration file path', default='./configs/prepare_data2d_RC.yaml')
 args = argparser.parse_args()
+
+
+
+
+
 
 if __name__ == '__main__':
 
@@ -144,7 +150,37 @@ if __name__ == '__main__':
 
                 # Get slice pixel spacing
                 slice_pixel_spacing = slice_dicom.PixelSpacing
+
+
+
+
+
+
                 pass
 
+
+
+
+
+            # Adapt HU
+            # todo @ltronchin
+
+
+            # Adaptive pixel spacing interpolation2d
+
+            # todo @fruffini
+
+
+
+
+            # Resize
+
+            # Normalization
+            # todo clip hu
+            # todo normalize in 0,1
+            # todo @ltronchin
+
+            # Save 2D/3D volume
+            # todo @fruffini
 
     print("May the force be with you")
