@@ -13,6 +13,7 @@ data:
   processed_dir: ./data/processed/
   label_file: ./data/raw/RC/DATABASEV1.xls
 
+
   classes:
     "no_rc": 0
     "rc": 1
@@ -28,6 +29,7 @@ data:
     lower_percentile:
     to_255:
     file_format: .tiff # .pkl
+
   dicom_tags:
     - PatientID
     - PatientName
