@@ -6,14 +6,15 @@ device:
   gpu_num_workers: 32
 
 data:
-  dataset_name: RC
-  img_dir: /Volumes/T7/RECO/
+  dataset_name: AERTS
+  img_dir: /Volumes/T7/NSCLC-Radiomics/
   interim_dir: /Volumes/T7/data/interim/
   processed_dir: /Volumes/T7/data/processed/
-  label_file: /Volumes/T7/RECO/RC/DATABASEV1.xls
-  metadata_file: None
+  info_file: /Volumes/T7/data/interim/AERTS/patients_info.xlsx
+  label_file: /Volumes/T7/NSCLC-Radiomics/AERTS/NSCLC_clinical_2019_10.csv
+  metadata_file: /Volumes/T7/NSCLC-Radiomics/AERTS/metadata.csv
   clinical_data:
-    information: None
+    information: ['PatientID', 'age', 'clinical.T.Stage', 'Clinical.N.Stage', 'Clinical.M.Stage', 'Overall.Stage', 'Histology', 'gender', 'Survival.time', 'deadstatus.event']
     "no_rc": 0
     "rc": 1
   preprocessing:
@@ -50,7 +51,7 @@ data:
   contour:
     contour_type: GTVp
     contour_save_format: .nii
-    masks_target: ['Lungs','Lesions']
+    masks_target: ['Lesions', 'Lungs']
     union_target: ['Lesions_Lungs']
 
 

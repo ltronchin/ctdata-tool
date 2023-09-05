@@ -1,0 +1,58 @@
+seed: 0
+exp_name:
+
+device:
+  cuda_device: cuda:0
+  gpu_num_workers: 32
+
+data:
+  dataset_name: NSCLC-RadioGenomics
+  img_dir: /Volumes/T7/NSCLC-RadioGenomics
+  interim_dir: /Volumes/T7/data/interim/
+  processed_dir: /Volumes/T7/data/processed/
+  label_file: /Volumes/T7/NSCLC-RadioGenomics/NSCLC-RadioGenomics/NSCLCR01Radiogenomic_DATA_LABELS_2018.csv
+  info_file: /Volumes/T7/data/interim/NSCLC-RadioGenomics/patients_info.xlsx
+  metadata_file: /Volumes/T7/NSCLC-RadioGenomics/NSCLC-RadioGenomics/metadata.csv
+  clinical_data: ['Case ID', 'Patient affiliation', 'Age at Histological Diagnosis', 'Weight (lbs)', 'Gender', 'Ethnicity', 'Smoking status', 'Pack Years', 'Quit Smoking Year', '%GG',
+  'Tumor Location (choice=RUL)', 'Tumor Location (choice=RML)', 'Tumor Location (choice=RLL)', 'Tumor Location (choice=LUL)', 'Tumor Location (choice=LLL)', 'Tumor Location (choice=L Lingula)', 'Tumor Location (choice=Unknown)', 'Histology ', 'Pathological T stage', 'Pathological N stage', 'Pathological M stage', 'Histopathological Grade', 'Lymphovascular invasion', 'Pleural invasion (elastic, visceral, or parietal)', 'EGFR mutation status', 'KRAS mutation status', 'ALK translocation status', 'Adjuvant Treatment', 'Chemotherapy', 'Radiation', 'Recurrence', 'Recurrence Location', 'Date of Recurrence', 'Date of Last Known Alive', 'Survival Status', 'Date of Death', 'Time to Death (days)', 'CT Date', 'Days between CT and surgery', 'PET Date']
+  preprocessing:
+    # resize
+    img_size: 256
+    interpolation: linear
+    # normalization and clip
+    range:
+      min: -1000 # -1200 # -1000
+      max: 1000 # 400 # 1000
+    upper_percentile:
+    lower_percentile:
+    to_255:
+    file_format: .tiff # .pkl
+    save_to_volume: False
+  dicom_tags:
+    - PatientID
+    - PatientName
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
+  contour:
+    contour_type: GTVp
+    contour_save_format: .nii
+    masks_target: ['Lesions']
+    union_target: []
+
+
+reports:
+  reports_dir: "./reports/"
+  snap: True

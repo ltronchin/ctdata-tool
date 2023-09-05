@@ -4,7 +4,7 @@ import pickle
 import shutil
 from copy import deepcopy
 import imageio
-from scipy import interpolate
+from scipy import interpolate, ndimage
 import random
 from nilearn.image import new_img_like
 import nibabel as nib
@@ -103,6 +103,43 @@ def load_volumes_with_names(file_path):
 
 
 
+def save_slices(volume, directory, index_start):
+    for z_index in range(volume.shape[2]):
+        # Slice file creation
+        slice_number = index_start + z_index
+        slice_file = os.path.join(directory, f'{slice_number}_slice.nii.gz')
+        # Slice extraction
+        slice = volume[:, :, z_index]
+        # Save slice as nifti
+        affine = np.eye(4)
+        ni_img = nib.Nifti1Image(slice, affine=affine)
+        nib.save(ni_img, slice_file)
+        # increase slice number
+        slice_number += 1
+
+
+
+def save_volume_as_nifti(volume, directory, **kwargs):
+    volume_file = os.path.join(directory, f'volume.nii.gz')
+    # Slice extraction
+    # Save slice as nifti
+    affine = np.eye(4)
+    ni_img = nib.Nifti1Image(volume, affine=affine)
+    nib.save(ni_img, volume_file)
+
+
+
+def save_ct_scan(save_volume=False, **kwargs):
+
+    if save_volume:
+        save_volume_as_nifti(**kwargs)
+    else:
+        save_slices(**kwargs)
+
+
+
+
+
 
 
 def set_padding_to_air(image, padding_value=-1000, change_value="lower", new_value=-1000):
@@ -169,6 +206,20 @@ def transform_to_HU(slice, intercept, slope, padding_value=-1000, change_value="
 
     return slice
 
+
+def interpolate_z_axis(image, slices_spacing, target_spacing=3):
+
+    # Compute the resampling factor for the z-axis
+    resampling_factor_z = slices_spacing / target_spacing
+
+    # Compute the new depth after resampling
+    new_depth = int(image.shape[0] * resampling_factor_z)
+
+    # Resample the volume along the z-axis using scipy.ndimage.zoom
+    resampled_volume = ndimage.zoom(image, (1, 1, resampling_factor_z), order=3)
+
+    # Print the dimensions of the original and resampled volumes
+    return resampled_volume
 def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1]):
     """
     This function interpolates a slice of a patient, given its metadata and the index of the z coordinate, in order to
@@ -220,8 +271,8 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
     return interpolated_slice
 
 
-def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,
-                         z_spacing=1, is_mask=False, **kwargs):
+def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False, original_spacing=1,
+                         z_spacing=3, is_mask=False, **kwargs):
     """
     This function interpolates the slices of a patient.
 
@@ -247,8 +298,9 @@ def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_plana
             volume_output[:, :, z_i] = volume_output[:, :, z_i] > 122.5
             volume_output[:, :, z_i] = volume_output[:, :, z_i].astype(np.int8) * 255
 
-    # TODO OPTION TO INTERPOLATE Z
-    # Set padding to air
+    if interpolate_z:
+        volume_output = interpolate_z_axis(volume, original_spacing, z_spacing)
+
     if not is_mask:
         return volume_output.astype(np.float32)
     else:

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pydicom
+from scipy import ndimage
 from tqdm import tqdm
 from src.utils import util_dicom
 import cv2
@@ -34,20 +35,6 @@ def Volume_mask_and_original(volume_original, volume_mask, fill=-1000):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def Volume_mask_and_or_mask(mask_one, mask_two, OR=True):
     """
     This function returns the mask of the union or the intersection of two volumes mask.
@@ -58,52 +45,91 @@ def Volume_mask_and_or_mask(mask_one, mask_two, OR=True):
 
         :return: numpy array of the mask of the union or the intersection of the two volumes
     """
-    shapes = volume_one.shape
+    shapes = mask_one.shape
     final_mask = np.zeros(shapes)
     function_booleans = {True: np.bitwise_or, False: np.bitwise_and}
     for k in range(shapes[2]):
         for j in range(shapes[1]):
-            final_mask[:, j, k] = function_booleans[OR](volume_one[:, j, k], volume_two[:, j, k])
+            final_mask[:, j, k] = function_booleans[OR](mask_one[:, j, k], mask_two[:, j, k])
     return final_mask
 
 
-def get_slices_and_masks(ds_seg, roi_names=[], patient_dir=str):
+def get_slices_and_masks(ds_seg, roi_names=[], slices_dir=str, dataset=None):
     """
     This function returns the slices and the mask of a specific roi all ordered by the
     Patient Image Position inside the dicom metadata.
-    :param patient_dir: path to the patient directory
+    :param slices_dir: path to the patient directory
     :param ds_seg: dicom dataset of the segmentation file
     :param roi_names: list of the roi names to extract, if roi_names is empty, no roi will be extracted
+    :param dataset_name: name of the dataset
     :return: img_voxel: img_voxel: list of all the array slices,
              metadatas: ordered list of the dicom metadata,
              voxel_by_rois: dictionary of the ordered mask voxel for each roi
     """
 
-    slice_orders = util_dicom.slice_order(patient_dir)
+    slice_orders = util_dicom.slice_order(slices_dir, dataset)
     # Load slices :
     img_voxel = []
     metadatas = []
     voxel_by_rois = {name: [] for name in roi_names}
     pbar = tqdm(slice_orders)
+
+
+
+
     for img_id, _ in pbar:
-        pbar.set_description("Processing Patient ID:  %s" % os.path.basename(patient_dir))
+        pbar.set_description("Processing Patient ID:  %s" % os.path.basename(slices_dir.split('/')[5]))
         # Load the image dcm
-        dcm_ = pydicom.dcmread(patient_dir + "/CT." + img_id + ".dcm")
+        slice_file = dataset.get_slice_file(slices_dir, img_id)
+        dcm_ = pydicom.dcmread(slice_file)
         metadatas.append(dcm_)
         # Get the image array
-        img_array = pydicom.dcmread(patient_dir + "/CT." + img_id + ".dcm").pixel_array.astype(np.float32)
+        img_array = dcm_.pixel_array.astype(np.float32)
         img_voxel.append(img_array)
+        dataset.set_shape(img_array.shape)
+        # Get voxel-by-Rois dictionary
+        voxel_by_rois = dataset.create_voxels_by_rois(ds_seg, roi_names, slices_dir, img_id)
 
+        """        if dataset_name != 'NSCLC-RadioGenomics':
+            for roi_name in roi_names:
+                # GET ROIS
+                idx = np.where(np.array(util_dicom.get_roi_names(ds_seg)) == roi_name)[0][0]
+                contour_datasets = util_dicom.get_roi_contour_ds(ds_seg, idx)
+                mask_dict = util_dicom.get_mask_dict(contour_datasets, slices_dir, img_id=img_id, dataset_name=dataset_name)
+                if img_id in mask_dict:
+                    mask_array = mask_dict[img_id]
+                else:
+                    mask_array = np.zeros_like(img_array)
+                voxel_by_rois[roi_name].append(mask_array)
+
+    if dataset_name == 'NSCLC-RadioGenomics':
         for roi_name in roi_names:
-            idx = np.where(np.array(util_dicom.get_roi_names(ds_seg)) == roi_name)[0][0]
-            contour_datasets = util_dicom.get_roi_contour_ds(ds_seg, idx)
-            mask_dict = util_dicom.get_mask_dict(contour_datasets, patient_dir + "/CT.")
+            seg = ds_seg.pixel_array
+            # reorient the seg array
+            seg = np.fliplr(seg.T)
+            if seg.shape[2] != len(img_voxel):
+                s = ds_seg.ReferencedSeriesSequence._list
+                RefSOPInstanceUID_list = [slice.ReferencedSOPInstanceUID for slice in s[0].ReferencedInstanceSequence._list]
+                true_slices = [img_id[0] in RefSOPInstanceUID_list for img_id, UID in zip(slice_orders, RefSOPInstanceUID_list) ]
+                new_voxel = {}
+                i = 0
 
-            if img_id in mask_dict:
-                mask_array = mask_dict[img_id]
-            else:
-                mask_array = np.zeros_like(img_array)
-            voxel_by_rois[roi_name].append(mask_array)
+                for img_id in slice_orders:
+                    found_ = False
+                    for UID in RefSOPInstanceUID_list:
+                        if str(img_id[0][0]) == (UID):
+                            new_voxel[img_id[0][1]] = seg[:,:,i]
+                            i =+ 1
+                            found_ = True
+                        else:
+                            pass
+                    if not found_:
+                        new_voxel['None' + img_id[0][1]] = np.zeros(shape=(512,512))
+
+                seg = np.stack(list(new_voxel.values()), 2)
+
+            voxel_by_rois[roi_name].append(seg)"""
+
     return img_voxel, metadatas, voxel_by_rois
 
 

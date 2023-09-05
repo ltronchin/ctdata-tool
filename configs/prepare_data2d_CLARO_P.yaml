@@ -7,13 +7,13 @@ device:
 
 data:
   dataset_name: RC
-  img_dir: /Volumes/T7/RECO/
-  interim_dir: /Volumes/T7/data/interim/
-  processed_dir: /Volumes/T7/data/processed/
-  label_file: /Volumes/T7/RECO/RC/DATABASEV1.xls
-  metadata_file: None
-  clinical_data:
-    information: None
+
+  img_dir: ./data/raw/
+  interim_dir: ./data/interim/
+  processed_dir: ./data/processed/
+  label_file: ./data/raw/RC/DATABASEV1.xls
+
+  classes:
     "no_rc": 0
     "rc": 1
   preprocessing:
@@ -28,7 +28,6 @@ data:
     lower_percentile:
     to_255:
     file_format: .tiff # .pkl
-    save_to_volume: False
   dicom_tags:
     - PatientID
     - PatientName
@@ -47,12 +46,11 @@ data:
     - PhotometricInterpretation
     - WindowCenter
     - WindowWidth
-  contour:
-    contour_type: GTVp
-    contour_save_format: .nii
-    masks_target: ['Lungs','Lesions']
-    union_target: ['Lesions_Lungs']
 
+model:
+  model_dir: ./models/10/multimodal # folder to save trained model
+
+trainer:
 
 reports:
   reports_dir: "./reports/"
