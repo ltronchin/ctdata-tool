@@ -71,16 +71,14 @@ def get_slices_and_masks(ds_seg, roi_names=[], slices_dir=str, dataset=None):
     # Load slices :
     img_voxel = []
     metadatas = []
-    voxel_by_rois = {name: [] for name in roi_names}
-    pbar = tqdm(slice_orders)
 
+    voxel_by_rois = {name : [] for name in roi_names}
+    voxel_by_rois_ids = dataset.create_voxels_by_rois(ds_seg, roi_names, slices_dir, number_of_slices=len(slice_orders)).get_voxel_by_rois()
 
-
-
-    for img_id, _ in pbar:
-        pbar.set_description("Processing Patient ID:  %s" % os.path.basename(slices_dir.split('/')[5]))
+    for img_id, _ in slice_orders:
         # Load the image dcm
-        slice_file = dataset.get_slice_file(slices_dir, img_id)
+
+        slice_file = dataset.get_slice_file(slices_dir, img_id=img_id)
         dcm_ = pydicom.dcmread(slice_file)
         metadatas.append(dcm_)
         # Get the image array
@@ -88,47 +86,16 @@ def get_slices_and_masks(ds_seg, roi_names=[], slices_dir=str, dataset=None):
         img_voxel.append(img_array)
         dataset.set_shape(img_array.shape)
         # Get voxel-by-Rois dictionary
-        voxel_by_rois = dataset.create_voxels_by_rois(ds_seg, roi_names, slices_dir, img_id)
-
-        """        if dataset_name != 'NSCLC-RadioGenomics':
+        Img_SOPInstanceUID, Img_Filename = dataset.get_SOP_FILENAME(img_id=img_id)
+        if len(roi_names) == 0:
+            voxel_by_rois = None
+        else:
             for roi_name in roi_names:
-                # GET ROIS
-                idx = np.where(np.array(util_dicom.get_roi_names(ds_seg)) == roi_name)[0][0]
-                contour_datasets = util_dicom.get_roi_contour_ds(ds_seg, idx)
-                mask_dict = util_dicom.get_mask_dict(contour_datasets, slices_dir, img_id=img_id, dataset_name=dataset_name)
-                if img_id in mask_dict:
-                    mask_array = mask_dict[img_id]
+                if Img_SOPInstanceUID in voxel_by_rois_ids[roi_name][0].keys():
+                    mask_array = voxel_by_rois_ids[roi_name][0][Img_SOPInstanceUID]
                 else:
-                    mask_array = np.zeros_like(img_array)
+                    mask_array = np.zeros_like(img_array).astype(bool)
                 voxel_by_rois[roi_name].append(mask_array)
-
-    if dataset_name == 'NSCLC-RadioGenomics':
-        for roi_name in roi_names:
-            seg = ds_seg.pixel_array
-            # reorient the seg array
-            seg = np.fliplr(seg.T)
-            if seg.shape[2] != len(img_voxel):
-                s = ds_seg.ReferencedSeriesSequence._list
-                RefSOPInstanceUID_list = [slice.ReferencedSOPInstanceUID for slice in s[0].ReferencedInstanceSequence._list]
-                true_slices = [img_id[0] in RefSOPInstanceUID_list for img_id, UID in zip(slice_orders, RefSOPInstanceUID_list) ]
-                new_voxel = {}
-                i = 0
-
-                for img_id in slice_orders:
-                    found_ = False
-                    for UID in RefSOPInstanceUID_list:
-                        if str(img_id[0][0]) == (UID):
-                            new_voxel[img_id[0][1]] = seg[:,:,i]
-                            i =+ 1
-                            found_ = True
-                        else:
-                            pass
-                    if not found_:
-                        new_voxel['None' + img_id[0][1]] = np.zeros(shape=(512,512))
-
-                seg = np.stack(list(new_voxel.values()), 2)
-
-            voxel_by_rois[roi_name].append(seg)"""
 
     return img_voxel, metadatas, voxel_by_rois
 

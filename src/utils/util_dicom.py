@@ -65,7 +65,7 @@ def get_roi_contour_ds(rt_sequence, index):
     return contours
 
 
-def contour2poly(contour_dataset, path, img_id, dataset):
+def contour2poly(contour_dataset, path, dataset):
     """
     Given a contour dataset (a DICOM class) and path that has .dcm files of
     corresponding images return polygon coordinates for the contours.
@@ -85,31 +85,13 @@ def contour2poly(contour_dataset, path, img_id, dataset):
 
     contour_coord = contour_dataset.ContourData
     img_SOP = contour_dataset.ContourImageSequence[0].ReferencedSOPInstanceUID
-    slice_file = dataset.get_slice_file(path, img_id)
+    slice_file = dataset.get_slice_file(path, img_SOP=img_SOP)
     # x, y, z coordinates of the contour in mm
 
     coord, img_id_or = dataset.get_coord(contour_coord, img_SOP)
     # extract the image id corresponding to given countour
     # read that dicom file
 
-
-
-    """    
-    if dataset_name == 'AERTS':
-        img_id_or = img_id
-        if str(img_id[0]) != str(img_SOP):
-            img_id = img_id[1]
-            slice_file = path + img_id + '.dcm'
-            # this is the center of the upper left voxel
-            coord = None
-        else:
-            img_id = img_id[1]
-            slice_file = path + img_id + '.dcm'
-
-    elif dataset_name == 'RC':
-        img_id = img_SOP
-        slice_file = path + img_id + '.dcm'
-    """
     img = dicom.read_file(slice_file)
     img_arr = img.pixel_array
     img_shape = img_arr.shape
@@ -161,6 +143,30 @@ def get_mask_dict(contour_datasets, path, img_id, **kwargs):
 
     for cdataset in contour_datasets:
         coords, img_id, shape = contour2poly(cdataset, path, img_id, **kwargs)
+        mask = poly_to_mask(coords, *shape) if coords else np.zeros(shape).astype(bool)
+        img_contours_dict[img_id] += mask
+
+    return img_contours_dict
+
+
+def create_mask_dict(contour_datasets, path, **kwargs):
+    """
+    Inputs:
+        contour_datasets (list): list of dicom.dataset.Dataset for contours
+        path (str): path of directory with images
+        img_id (str): img ID name for the slice
+
+    Return:
+        img_contours_dict (dict): img_id : contour array pairs
+    """
+
+    from collections import defaultdict
+
+    # create empty dict for
+    img_contours_dict = defaultdict(int)
+
+    for cdataset in contour_datasets:
+        coords, img_id, shape = contour2poly(cdataset, path, **kwargs)
         mask = poly_to_mask(coords, *shape) if coords else np.zeros(shape).astype(bool)
         img_contours_dict[img_id] += mask
 

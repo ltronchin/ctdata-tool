@@ -7,26 +7,22 @@ import sys
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
 
-import re
-from copy import deepcopy
 import os
 import yaml
 import pandas as pd
-import numpy as np
 import argparse
-import glob
 import pydicom
 from src.utils import util_path, util_data, util_contour, util_datasets
 
 # Parser
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RC.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
 argparser.add_argument('-i', '--interpolate_xy', action='store_true',
                        help='debug mode', default=False)
 args = argparser.parse_args()
 
-pandarallel.initialize(nb_workers=2)
+pandarallel.initialize(nb_workers=6, progress_bar=True)
 
 
 def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset):
@@ -40,7 +36,15 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
     try:
         if os.path.isdir(patient_dir):
             # Load idpatient from dicom file
+
+
+            if 'R01-002' in patient_dir:
+                pass
             dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=True)
+
+            dataset.set_filename_to_SOP_dict(dicom_files)
+
+
 
             # Open files
             ds_seg = pydicom.dcmread(seg_files[0])
@@ -54,6 +58,7 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
 
             mask_dir = dataset.get_mask_dir()
             patient_path = os.path.join(mask_dir, patient_fname)
+
             # Create the patient directory for masks
             util_path.create_replace_existing_path(patient_path, force=True, create=True)
 
@@ -80,7 +85,7 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
                 rois_dict=rois_dict,
                 masks_target=masks_target,
                 union_target=union_target,
-                dataset_name=dataset_name,
+                dataset=dataset,
                 shape=(img_voxel[0].shape[0], img_voxel[0].shape[1], len(img_voxel)))
 
             # Interpolate Masks:
@@ -125,9 +130,7 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
     except AssertionError as e:
         shutil.rmtree(patient_path)
         print(e)
-    except ValueError as e:
-        shutil.rmtree(patient_path)
-        print('Assertion error',e.with_traceback)
+
 
 
 
@@ -150,7 +153,7 @@ if __name__ == '__main__':
     # Initialize dataset class
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_contour_analysis()
-
+    Dataset_class.load_dicom_info_report()
 
 
 
@@ -159,7 +162,7 @@ if __name__ == '__main__':
 
 
     # Parallelize the elaboration of each patient
-    elaborate_patient_volume(patients_list[120], cfg=cfg, dataset=Dataset_class) # For debugging
+    elaborate_patient_volume(patients_list[20], cfg=cfg, dataset=Dataset_class) # For debugging
     #pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
 
     print("May the force be with you")

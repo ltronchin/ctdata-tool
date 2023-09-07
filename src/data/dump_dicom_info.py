@@ -17,7 +17,7 @@ from tqdm import tqdm
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RC.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
 args = argparser.parse_args()
 
 
@@ -81,7 +81,7 @@ if __name__ == '__main__':
 
     # Save Dicom info report
     Dataset_class.save_dicom_info_report()
-    Dataset_class.save_clinical()
+
 
 
 print("May the force be with you")
