@@ -17,7 +17,7 @@ from tqdm import tqdm
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_R.yaml')
 args = argparser.parse_args()
 
 
@@ -33,7 +33,11 @@ if __name__ == '__main__':
 
     dataset_name = cfg['data']['dataset_name']
     # Dataset Class Selector
-    dataset_class_selector = {'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics, 'AERTS': util_datasets.AERTS, 'RC': util_datasets.RECO}
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro':util_datasets.ClaroRetrospective}
 
 
     # Initialize dataset class
@@ -52,24 +56,7 @@ if __name__ == '__main__':
             try:
                 # Select name from label file
                 dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
-                """ dicom_files.sort()
-                # Read the first DICOM file in the directory and extract the DICOM tags
-                ds = pydicom.dcmread(dicom_files[0])
-                data = {
-                    tag: getattr(ds, tag, None) for tag in dicom_tags,
-                    
-                }
-                # Add patient and label to data dict
-                if len(dicom_files) == 1:
-                    print(f'Patient {patient_id} has only one slice')
-                data['#slices'] = len(dicom_files)
 
-        
-                            
-                assert data['SliceThickness'] >= 1, f'Patient {patient_id} has SliceThickness < 1'
-                
-                dicom_info.loc[len(dicom_info)] = data
-                """
                 data = Dataset_class.add_dicom_infos(dicom_files, patient_id)
                 # Append the patient_id and DICOM data to the DataFram
             except AssertionError as e:

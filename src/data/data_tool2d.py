@@ -59,6 +59,11 @@ def saveCT(patient_dir, cfg, dataset):
             slices_dir = dataset.get_slices_dir()
             mask_dir = dataset.get_mask_dir()
 
+            # Select only slices that contains the lungs, if there is the lungs mask in the dataset
+            masks_file = os.path.join(mask_dir, patient_fname, f'Masks_interpolated_{patient_fname}_.pkl.gz')
+            bbox_file = os.path.join(mask_dir, patient_fname, f'bboxes_interpolated_{patient_fname}.xlsx')
+            bbox_df = pd.read_excel(bbox_file).rename(columns={'Unnamed: 0': 'ROI_id'})
+
             patient_dir_processed = os.path.join(slices_dir, patient_fname)
             patient_images_dir_path = os.path.join(patient_dir_processed)
             util_path.create_replace_existing_path(patient_images_dir_path, force=True, create=True)
@@ -73,12 +78,9 @@ def saveCT(patient_dir, cfg, dataset):
 
             # Stack all the slices
             img_voxel = np.stack(img_voxel, axis=2)
-            HU_voxel = np.zeros(img_voxel.shape, dtype=np.float32)
 
-            # Select only slices that contains the lungs, if there is the lungs mask in the dataset
-            masks_file = os.path.join(mask_dir, patient_fname, f'Masks_interpolated_{patient_fname}_.pkl.gz')
-            bbox_file = os.path.join(mask_dir, patient_fname, f'bboxes_interpolated_{patient_fname}.xlsx')
-            bbox_df = pd.read_excel(bbox_file).rename(columns={'Unnamed: 0': 'ROI_id'})
+
+
             # ROIs IDs
             ROIS_ids = bbox_df.loc[:, 'ROI_id'].tolist()
             # [*0] If there are musk lungs in the dataset select the slices in the volume that contains lungs
@@ -89,28 +91,28 @@ def saveCT(patient_dir, cfg, dataset):
             # Number of slices original
             number_of_CT_slices_original = img_voxel.shape[2]
             final_info_patient['#slices_original'] = number_of_CT_slices_original
+
             if 'Lungs' in masks_target:
                 # Select only slices with the lungs inside
-                selection_slices_with_lungs = bbox_df['bbox_lungs'] != '[0, 0, 0, 0]'
 
+                # ----------------------- Max BBOX -------------------------- #
+                selection_slices_with_lungs = bbox_df['bbox_lungs'] != '[0, 0, 0, 0]'
                 dict_max_bbox = {
                     f'max_bbox_{mask_class.lower()}': util_contour.get_maximum_bbox_over_slices([eval(bbox) for bbox in bbox_df.loc[selection_slices_with_lungs,
                     f'bbox_{mask_class.lower()}'].tolist() if sum(eval(bbox)) != 0]) for mask_class in masks_target
                 }
-
-                # Select only slices with the lungs inside
-                img_voxel = img_voxel[:, :, selection_slices_with_lungs]
-
                 # Number of slices with lungs only
                 number_of_CT_slices_lungs_only = img_voxel.shape[2]
                 final_info_patient['#slices_lungs_only'] = number_of_CT_slices_lungs_only
+                # Add max bbox to the final info patient
+                final_info_patient.update(dict_max_bbox)
 
                 for mask_class in masks_target:
                     # Replace the mask volume with the reduced one
                     masks_dataset[mask_class] = masks_dataset[mask_class][:, :, selection_slices_with_lungs]
                 # ROIs IDs only lungs slices
                 ROIS_ids = bbox_df.loc[selection_slices_with_lungs, 'ROI_id'].tolist()
-
+            HU_voxel = np.zeros(img_voxel.shape, dtype=np.float32)
             # ROIs IDs
             final_info_patient['slices_in'] = ROIS_ids[0]
             final_info_patient['slices_fin'] = ROIS_ids[1]
@@ -159,15 +161,17 @@ def saveCT(patient_dir, cfg, dataset):
 
             # [4] Set padding to the minimum clipping value
             HU_int_voxel = util_data.set_padding_to_air(HU_int_voxel, padding_value=preprocessing['range']['min'], new_value=preprocessing['range']['min'])
-
+            if 'Lungs' in masks_target:
+                HU_int_voxel = HU_int_voxel[:,:, selection_slices_with_lungs]
             # [*5] If there is the body mask in the dataset intersect the volume with the body mask
             if 'Body' in masks_target:
                 # Intersect pixel with the body-mask if is present in the mask dataset
                 Body_mask = masks_dataset['Body']
+
                 HU_int_voxel = util_contour.Volume_mask_and_original(HU_int_voxel, Body_mask)
 
                 # We are not interested in the body mask anymore
-                masks_target.pop('Body')
+                masks_target.remove('Body')
 
             # ---------------------------------------- SAVE ----------------------------------------
             # SAVE all the masks inside masks_target
@@ -193,6 +197,14 @@ def saveCT(patient_dir, cfg, dataset):
         return info_patients_final
     except AssertionError as e:
         print(e)
+        print('AssertionError\n', 'Patient: ', os.path.basename(patient_dir), '\n', e)
+    except KeyError as k:
+        print(k)
+        print('KeyError\n', 'Patient: ', os.path.basename(patient_dir), '\n', k)
+    except AttributeError as ae:
+        print('AttributeError\n', 'Patient: ', os.path.basename(patient_dir), '\n', ae)
+
+
 
 
 if __name__ == '__main__':
@@ -211,7 +223,11 @@ if __name__ == '__main__':
     cfg['interpolate_v'] = cfg_save['mode']['2d']['interpolate_v']
 
     # Dataset Class Selector
-    dataset_class_selector = {'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics, 'AERTS': util_datasets.AERTS, 'RC': util_datasets.RECO}
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro':util_datasets.ClaroRetrospective}
 
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_slices_saving()
@@ -220,15 +236,16 @@ if __name__ == '__main__':
     # List all patient directories
     patients_list, _ = Dataset_class.get_patients_directories()
     # Parallelize the elaboration of each patient
-    #info_patients_final = saveCT(patients_list[0], cfg=cfg, dataset=Dataset_class)  # DEBUG
+
+    # info_patients_final = saveCT(patients_list[20], cfg=cfg, dataset=Dataset_class)  # DEBUG
 
     info_patients_final = pd.Series(patients_list).parallel_apply(saveCT, cfg=cfg, dataset=Dataset_class)
 
-    # Save patients informations
+
     info_patients_final_clean = [value for value in [i for i in info_patients_final.tolist() if i is not None] if
                                  len(value) != 0]
     info_patients_final_df = pd.DataFrame([value[0] for value in info_patients_final_clean]).set_index('ID')
-    final_file = './data/processed/RC/data/data.xlsx'
+    final_file = os.path.join(Dataset_class.slices_dir, 'data.xlsx')
     info_patients_final_df.to_excel(final_file)
 
     print("May the force be with you")

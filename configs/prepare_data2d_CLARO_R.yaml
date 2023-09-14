@@ -6,16 +6,18 @@ device:
   gpu_num_workers: 32
 
 data:
-  dataset_name: RC
+  dataset_name: Claro_Retro
 
-  img_dir: ./data/raw/
-  interim_dir: ./data/interim/
-  processed_dir: ./data/processed/
-  label_file: ./data/raw/RC/DATABASEV1.xls
+  img_dir: /Volumes/T7/CLARO DATA/Claro_Retro
+  interim_dir: /Volumes/T7/data/interim/
+  processed_dir: /Volumes/T7/data/processed/
+  info_file: /Volumes/T7/data/interim/Claro_Retro/patients_info.xlsx
+  label_file: /Volumes/T7/CLARO DATA/Claro_Retro/CLARO_retrospettivo_clinical_db.xlsx
+  metadata_file: None
 
   classes:
-    "no_rc": 0
-    "rc": 1
+    "adaptive": 1
+    "non-adaptive": 2
   preprocessing:
     # resize
     img_size: 256
@@ -46,11 +48,12 @@ data:
     - PhotometricInterpretation
     - WindowCenter
     - WindowWidth
+  contour:
+    contour_type: GTVp
+    contour_save_format: .nii
+    masks_target: ['Lungs','Lesions','Body']
+    union_target: ['Lesions_Lungs']
 
-model:
-  model_dir: ./models/10/multimodal # folder to save trained model
-
-trainer:
 
 reports:
   reports_dir: "./reports/"

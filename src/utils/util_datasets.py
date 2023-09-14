@@ -117,7 +117,6 @@ class BaseDataset(object):
         self.volumes_target = {}
         self.mask_dir = os.path.join(self.interim_dir, '3D_masks')
 
-
     def create_slices_directory_name(self):
         name_dict = {(True, True): 'volumes_V', (True, False): 'volumes_I', (False, False): 'slices'}
         data_directory_name = name_dict[self.cfg['save_volume'], self.cfg['interpolate_v']]
@@ -126,15 +125,12 @@ class BaseDataset(object):
     def get_slices_dir(self):
         return self.slices_dir
 
-
     def initialize_slices_saving(self):
         self.work_with_CT_scan = True
         self.mask_dir = os.path.join(self.interim_dir, '3D_masks')
         self.create_slices_directory_name()
 
-
         self.preprocessing = self.cfg['data']['preprocessing']
-
 
     def get_mask_dir(self):
         return self.mask_dir
@@ -156,7 +152,18 @@ class BaseDataset(object):
         raise NotImplementedError(f"The method get_patients_directories is not implemented for the child class: {self.__class__.__name__}")
 
     def add_dicom_infos(self, dicom_files, patient_id):
-        raise NotImplementedError(f"The method add_dicom_infos is not implemented for the child class: {self.__class__.__name__}")
+        dicom_files.sort()
+        # Read the first DICOM file in the directory and extract the DICOM tags
+        ds = pydicom.dcmread(dicom_files[0])
+        data = {
+            tag: getattr(ds, tag, None) for tag in self.dicom_tags
+        }
+        data['#slices'] = len(dicom_files)
+        assert data['SliceThickness'] >= 1, f'Patient {patient_id} has SliceThickness < 1'
+
+        self.dicom_info.loc[len(self.dicom_info)] = data
+
+        return data
 
     def save_clinical(self):
         raise NotImplementedError(f"The method save_clinical is not implemented for the child class: {self.__class__.__name__}")
@@ -181,7 +188,6 @@ class BaseDataset(object):
 
     def get_slice_file(self, slices_dir, img_id=None, img_SOP=None):
         raise NotImplementedError(f"The method get_slice_file in not used inside the child class: {self.__class__.__name__}")
-
 
     def get_SOP_FILENAME(self, img_id):
         raise NotImplementedError(f"The method get_SOP_FILENAME in not used inside the child class: {self.__class__.__name__}")
@@ -210,6 +216,146 @@ class BaseDataset(object):
         return coord, img_id
 
 
+class ClaroRetrospective(BaseDataset):
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+
+    def get_patients_directories(self):
+        patient_list_accepted = os.listdir(self.img_raw_dir)
+        self.patient_paths = [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.img_raw_dir) if Id in patient_list_accepted and '.' not in Id]
+        self.patient_ids = [os.path.basename(patient_path) for patient_path in self.patient_paths]
+        return self.patient_paths, self.patient_ids
+
+    def load_label(self):
+        if self.label_file is None:
+            self.labels = None
+        else:
+            self.labels = pd.read_excel(self.label_file) if self.label_file.endswith('.xlsx') else pd.read_csv(self.label_file, sep=';')
+
+    def get_dicom_files(self, patient_dir, segmentation_load=False):
+        # List all .dcm files in the patient directory
+        CT_files = glob.glob(os.path.join(patient_dir, 'CT*.dcm'))
+        if segmentation_load:
+            seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
+            assert len(seg_files) > 0, "No segmentation file found"
+            return CT_files, patient_dir, seg_files, patient_dir
+        else:
+            return CT_files, patient_dir, None, None
+
+    def get_structures_names(self, ds_seg):
+
+        # Initialize structures ROIS names
+        self.initialize_rois()
+        # Available structures
+        for item in ds_seg.StructureSetROISequence:
+            name = item.ROIName
+            # Debug ALL SAVED
+            """
+            self.structures[item.ROINumber] = name
+            self.rois_classes.append('DEBUG')"""
+            matching, roi_class = self.matching_rois(roi_name=name)
+            assert matching is not None
+            if matching:
+                self.structures[item.ROINumber] = name
+                self.rois_classes.append(roi_class)
+        if len(self.structures) == 0:
+            print("No structures found")
+        else:
+            print("Available structures: ", self.structures)
+        return self
+    def create_voxels_by_rois(self, ds_seg, roi_names, slices_dir_patient, number_of_slices=None):
+        self.voxel_by_rois = {name: [] for name in roi_names}
+
+        for roi_name in roi_names:
+            # GET ROIS
+            try:
+                idx = np.where(np.array(util_dicom.get_roi_names(ds_seg)) == roi_name)[0][0]
+
+                # in this way we obtain the contour datasets for the roi_name
+                roi_contour_datasets = util_dicom.get_roi_contour_ds(ds_seg, idx)
+                mask_by_id_dict = util_dicom.create_mask_dict(roi_contour_datasets, slices_dir_patient, dataset=self)
+
+                self.voxel_by_rois[roi_name].append(mask_by_id_dict)
+            except AttributeError:
+                print(f"Error in {roi_name}")
+                continue
+        return self
+    def add_dicom_infos(self, dicom_files, patient_id):
+
+        dicom_temp = self.dicom_info.copy()
+        data = super().add_dicom_infos(dicom_files, patient_id)
+        # Get label
+        label = self.labels.loc[self.labels['nome'] == patient_id, 'Adaptive'].values[0]
+
+        data['Adaptive'] = label
+        dicom_temp.loc[len(dicom_temp) + 1] = data
+        self.dicom_info = dicom_temp.copy()
+        return data
+
+    def matching_rois(self, roi_name=None):
+
+        pattern = re.compile('(^lung[_\s])', re.IGNORECASE)
+        pattern_lungs = re.compile('polmoni$', re.IGNORECASE)
+
+        roi_name = roi_name.lower()
+        if "polmone" in roi_name.lower():
+            return True, 'Lungs'
+        if pattern_lungs.search(roi_name):
+            return True, 'Lungs'
+        elif pattern.search(roi_name):
+            return True, 'Lungs'
+        elif "corpo" in roi_name.lower():
+            return True, 'Body'
+        elif "body" in roi_name.lower():
+            return True, 'Body'
+        elif re.search("^CTV[0-9]{0,1}", roi_name.upper()) is not None:
+            return True, 'Lesions'
+        elif "external" in roi_name.lower():
+            return True, 'Body'
+        else:
+            return False, None
+
+    def save_clinical(self):
+        self.labels.set_index('ID paziente').to_csv(os.path.join(self.interim_dir, 'clinical_data.csv'), index=False)
+
+    def get_rois_name_dict(self):
+        pattern_lung = [re.compile('(^lung[-_\s])', re.IGNORECASE), re.compile('(^polmone[\s])', re.IGNORECASE), re.compile('(^lungs[-_\s])', re.IGNORECASE)]
+        pattern_body = [re.compile('(^body[\s])', re.IGNORECASE), re.compile('(^corpo[\s])', re.IGNORECASE),
+                        re.compile('(^external[\s])', re.IGNORECASE)]
+        pattern_ctv = [re.compile('^ctv[0-9]{0,1}', re.IGNORECASE)]
+        pattern_gtv = [re.compile('(^gtv[0-9-_\s])', re.IGNORECASE)]
+
+        self.rois_name_dict = {'lung': pattern_lung, 'body': pattern_body, 'ctv': pattern_ctv, 'gtv': pattern_gtv}
+
+    def get_slices_dict(self, slices_dir):
+        if slices_dir[-1] != '/': slices_dir += '/'
+        slices = []
+        for s in os.listdir(slices_dir):
+            try:
+                f = dicom.read_file(slices_dir + '/' + s)
+                f.ImagePositionPatient  #
+                assert f.Modality != 'RTDOSE'
+                slices.append(f)
+            except:
+                continue
+        slice_dict = {s.SOPInstanceUID: s.ImagePositionPatient[-1] for s in slices}
+
+        return slice_dict
+
+    def get_slice_file(self, slices_dir, img_id=None, img_SOP=None):
+        img_id = img_SOP if img_id is None else img_id
+        img_SOP = img_id if img_SOP is None else img_SOP
+
+        CT_dir_and_name = slices_dir + "/CT."
+        return CT_dir_and_name + img_id + ".dcm"
+
+    def set_filename_to_SOP_dict(self, CT_files):
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
+
+    def get_SOP_FILENAME(self, img_id):
+        return img_id, img_id
 
 
 class RECO(BaseDataset):
@@ -294,7 +440,7 @@ class RECO(BaseDataset):
             return False, None
 
     def get_rois_name_dict(self):
-        raise NotImplementedError(f"The method get_rois_name_dict in not used inside the child class: {self.__class__.__name__}")
+        pass
 
     def get_slices_dict(self, slices_dir):
         if slices_dir[-1] != '/': slices_dir += '/'
@@ -311,8 +457,9 @@ class RECO(BaseDataset):
 
         return slice_dict
 
-    def get_slice_file(self, slices_dir, img_id, img_SOP=None):
-        img_SOP = img_id
+    def get_slice_file(self, slices_dir, img_id=None, img_SOP=None):
+        img_SOP = img_id if img_SOP is None else img_SOP
+        img_id = img_SOP if img_id is None else img_id
         CT_dir_and_name = slices_dir + "/CT."
         return CT_dir_and_name + img_id + ".dcm"
 
@@ -327,20 +474,6 @@ class RECO(BaseDataset):
 class AERTS(BaseDataset):
     def __init__(self, cfg):
         super().__init__(cfg)
-
-    def add_dicom_infos(self, dicom_files, patient_id):
-        dicom_files.sort()
-        # Read the first DICOM file in the directory and extract the DICOM tags
-        ds = pydicom.dcmread(dicom_files[0])
-        data = {
-            tag: getattr(ds, tag, None) for tag in self.dicom_tags
-        }
-        data['#slices'] = len(dicom_files)
-        assert data['SliceThickness'] >= 1, f'Patient {patient_id} has SliceThickness < 1'
-
-        self.dicom_info.loc[len(self.dicom_info)] = data
-
-        return data
 
     def get_slices_dict(self, slices_dir):
         if slices_dir[-1] != '/': slices_dir += '/'
@@ -447,17 +580,10 @@ class AERTS(BaseDataset):
         return img_id[0], img_id[1]
 
 
-
-
 class NSCLCRadioGenomics(BaseDataset):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-
-
-
-
-
 
     def add_dicom_infos(self, dicom_files, patient_id):
         dicom_files.sort()
@@ -493,7 +619,7 @@ class NSCLCRadioGenomics(BaseDataset):
         patient_list_accepted = self.labels['Case ID'].to_list() if len(dicom_info) == 0 else dicom_info.index.to_list()
 
         self.patient_paths = [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.mask_dir) if Id in patient_list_accepted] if self.work_with_CT_scan \
-                else [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.img_raw_dir) if Id in patient_list_accepted]
+            else [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.img_raw_dir) if Id in patient_list_accepted]
 
         self.patient_ids = [os.path.basename(patient_path) for patient_path in self.patient_paths]
         return self.patient_paths, self.patient_ids

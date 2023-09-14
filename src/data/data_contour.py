@@ -17,7 +17,7 @@ from src.utils import util_path, util_data, util_contour, util_datasets
 # Parser
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_R.yaml')
 argparser.add_argument('-i', '--interpolate_xy', action='store_true',
                        help='debug mode', default=False)
 args = argparser.parse_args()
@@ -130,6 +130,11 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
     except AssertionError as e:
         shutil.rmtree(patient_path)
         print(e)
+    except AttributeError as ae:
+        print('AttributeError\n', 'Patient: ', os.path.basename(patient_dir), '\n', ae)
+        shutil.rmtree(patient_path)
+        print(ae)
+
 
 
 
@@ -148,8 +153,11 @@ if __name__ == '__main__':
     metadata_file = cfg['data']['metadata_file']
 
     # Dataset Class Selector
-    dataset_class_selector = {'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics, 'AERTS': util_datasets.AERTS, 'RC': util_datasets.RECO}
-
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro':util_datasets.ClaroRetrospective}
     # Initialize dataset class
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_contour_analysis()
@@ -162,6 +170,7 @@ if __name__ == '__main__':
 
 
     # Parallelize the elaboration of each patient
+    # Pierosara Giancarlo
     elaborate_patient_volume(patients_list[20], cfg=cfg, dataset=Dataset_class) # For debugging
     #pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
 
