@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from src.utils import util_contour
+import nibabel as nib
 
 dataset_name = 'AERTS'
 
@@ -31,7 +32,8 @@ for dir_par in tqdm(patient_dirs):
     # LOAD VOLUMES
     nii_volume = nib.load(v_file).dataobj
     volume = np.array(nii_volume)
-    mask = np.array(nib.load(m_file).dataobj)
+
+    nii_lesion = nib.load(l_file).dataobj
     lesion = np.array(nib.load(l_file).dataobj)
     mask_lesion = np.array(nib.load(m_l_file).dataobj)
 

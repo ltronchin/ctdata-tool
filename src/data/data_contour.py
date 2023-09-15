@@ -17,7 +17,7 @@ from src.utils import util_path, util_data, util_contour, util_datasets
 # Parser
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_CLARO_R.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
 argparser.add_argument('-i', '--interpolate_xy', action='store_true',
                        help='debug mode', default=False)
 args = argparser.parse_args()
@@ -38,10 +38,10 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
             # Load idpatient from dicom file
 
 
-            if 'R01-002' in patient_dir:
-                pass
-            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=True)
 
+            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=True)
+            if 'CC18047936' in patient_dir:
+                seg_files = [seg_files[2]]
             dataset.set_filename_to_SOP_dict(dicom_files)
 
 
@@ -51,8 +51,7 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
             ds = pydicom.dcmread(dicom_files[0])
 
             # Select id_patient
-            patient_fname = getattr(ds, 'PatientID', None)
-            assert patient_fname is not None, "Patient ID not found"
+            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=patient_dir)
 
             # Create the patient directory for masks
 
@@ -115,7 +114,6 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
                 bbox_interpolated_df.loc[:, f'max_bbox_{mask_name.lower()}'] = [max_bbox for i in range(len(bbox_interpolated_df))]
 
                 bbox_masks_int[mask_name] = bbox_interpolated_df
-
             # Concatenate bounding box report INTERPOLATED for BODY and LUNGS
             df_interpolated = pd.concat(
                 [bbox_df for bbox_df in bbox_masks_int.values()],
@@ -128,12 +126,14 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
             util_data.save_volumes_with_names(dict_final_masks_interpolated, volumes_file)
 
     except AssertionError as e:
+        print('AssertionError\n', 'Patient: ', os.path.basename(patient_dir), '\n', e)
         shutil.rmtree(patient_path)
-        print(e)
     except AttributeError as ae:
         print('AttributeError\n', 'Patient: ', os.path.basename(patient_dir), '\n', ae)
         shutil.rmtree(patient_path)
-        print(ae)
+    except KeyError as k:
+        print('KeyError\n', 'Patient: ', os.path.basename(patient_dir), '\n', k)
+        shutil.rmtree(patient_path)
 
 
 
@@ -157,7 +157,9 @@ if __name__ == '__main__':
         'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
         'AERTS': util_datasets.AERTS,
         'RC': util_datasets.RECO,
-        'Claro_Retro':util_datasets.ClaroRetrospective}
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective}
+
     # Initialize dataset class
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_contour_analysis()
@@ -170,8 +172,8 @@ if __name__ == '__main__':
 
 
     # Parallelize the elaboration of each patient
-    # Pierosara Giancarlo
-    elaborate_patient_volume(patients_list[20], cfg=cfg, dataset=Dataset_class) # For debugging
-    #pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
+    # CC19026796, CC19004775
+    #elaborate_patient_volume(patients_list[35], cfg=cfg, dataset=Dataset_class) # For debugging
+    pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
 
     print("May the force be with you")

@@ -18,7 +18,7 @@ import argparse
 
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
 argparser.add_argument('--save_config', '-s', help='save_config_file', default='./configs/prepare_data2d_saveconfig.yaml')
 
 args = argparser.parse_args()
@@ -52,14 +52,15 @@ def saveCT(patient_dir, cfg, dataset):
             ds = pydicom.dcmread(dicom_files[0])
 
             # Select id_patient
-            patient_fname = getattr(ds, 'PatientID', None)
-            assert patient_fname is not None, "Patient ID not found"
+            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=patient_dir)
             final_info_patient['ID'] = patient_fname
             # Create patient folders
             slices_dir = dataset.get_slices_dir()
             mask_dir = dataset.get_mask_dir()
 
             # Select only slices that contains the lungs, if there is the lungs mask in the dataset
+            if not os.path.exists(mask_dir):
+                raise AssertionError('There is not the folder')
             masks_file = os.path.join(mask_dir, patient_fname, f'Masks_interpolated_{patient_fname}_.pkl.gz')
             bbox_file = os.path.join(mask_dir, patient_fname, f'bboxes_interpolated_{patient_fname}.xlsx')
             bbox_df = pd.read_excel(bbox_file).rename(columns={'Unnamed: 0': 'ROI_id'})
@@ -227,7 +228,8 @@ if __name__ == '__main__':
         'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
         'AERTS': util_datasets.AERTS,
         'RC': util_datasets.RECO,
-        'Claro_Retro':util_datasets.ClaroRetrospective}
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective}
 
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_slices_saving()
@@ -237,8 +239,8 @@ if __name__ == '__main__':
     patients_list, _ = Dataset_class.get_patients_directories()
     # Parallelize the elaboration of each patient
 
-    # info_patients_final = saveCT(patients_list[20], cfg=cfg, dataset=Dataset_class)  # DEBUG
-
+    #info_patients_final = saveCT(patients_list[52], cfg=cfg, dataset=Dataset_class)  # DEBUG
+    # CC19026796
     info_patients_final = pd.Series(patients_list).parallel_apply(saveCT, cfg=cfg, dataset=Dataset_class)
 
 

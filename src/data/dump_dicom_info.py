@@ -17,7 +17,7 @@ from tqdm import tqdm
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_CLARO_R.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
 args = argparser.parse_args()
 
 
@@ -37,7 +37,8 @@ if __name__ == '__main__':
         'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
         'AERTS': util_datasets.AERTS,
         'RC': util_datasets.RECO,
-        'Claro_Retro':util_datasets.ClaroRetrospective}
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective}
 
 
     # Initialize dataset class

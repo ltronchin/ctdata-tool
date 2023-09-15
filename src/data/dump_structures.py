@@ -13,7 +13,7 @@ from src.utils import util_datasets
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_CLARO_R.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
 args = argparser.parse_args()
 
 if __name__ == '__main__':
@@ -27,8 +27,13 @@ if __name__ == '__main__':
 
     dataset_name = cfg['data']['dataset_name']
     # Dataset Class Selector
-    dataset_class_selector = {'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics, 'AERTS': util_datasets.AERTS, 'RC': util_datasets.RECO, 'Claro_Retro':
-        util_datasets.ClaroRetrospective}
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective}
+
     # Initialize dataset class
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.load_dicom_info_report()
@@ -50,16 +55,18 @@ if __name__ == '__main__':
                 dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
 
                 ds_seg = pydicom.dcmread(seg_files[0])
-                if 'Amatori Antonio' in patient_dir:
+
+                if  'CC19004775' in patient_dir or 'CC18047936' in patient_dir:
                     pass
                 # Get structures
                 structures, rois_classes = Dataset_class.get_structures_names(ds_seg).get_structures_and_classes()
 
-                data.append({'patient_dir': patient_dir, 'structures': structures, 'rois_classes': list(np.unique(rois_classes))})
-
+                Dataset_class.add_data_structures(patient_dir=patient_dir, structures=structures, rois_classes=rois_classes)
+                if  'CC19004775' in patient_dir or 'CC18047936' in patient_dir:
+                    pass
             except Exception as e:
                 print(e)
     # Create Save
-    Dataset_class.create_save_structures_report(data)
+    Dataset_class.create_save_structures_report()
     Dataset_class.save_clinical()
     print("May the force be with you")

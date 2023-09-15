@@ -6,14 +6,14 @@ device:
   gpu_num_workers: 32
 
 data:
-  dataset_name: CLARO_R
+  dataset_name: Claro_Pro
 
-  img_dir: /Volumes/T7/CLARO DATA/Polmoni retrospettivi (125pz)/Immagini/share/Polmoni retrospettivi (125pz)/Immagini
+  img_dir: /Volumes/T7/CLARO DATA/Claro_Pro/III_stg/RT_CT
   interim_dir: /Volumes/T7/data/interim/
   processed_dir: /Volumes/T7/data/processed/
-  info_file: /Volumes/T7/data/interim/CLARO_P/patients_info.xlsx
-  label_file: /Volumes/T7/CLARO DATA/Polmoni retrospettivi (125pz)/-per_estrazione-/Dati clinici (130pz - da escludere gli scartati).xls
-  metadata_file: False
+  info_file: /Volumes/T7/data/interim/Claro_Pro/patients_info.xlsx
+  label_file: /Volumes/T7/CLARO DATA/Claro_Pro/III_stg/CLARO_PRO_III_CLINIC_23_08_31.xlsx
+  metadata_file: None
 
   classes:
     "adaptive": 1
@@ -31,8 +31,6 @@ data:
     to_255:
     file_format: .tiff # .pkl
   dicom_tags:
-    - PatientID
-    - PatientName
     - SliceThickness
     - RescaleIntercept
     - RescaleSlope
@@ -48,3 +46,13 @@ data:
     - PhotometricInterpretation
     - WindowCenter
     - WindowWidth
+  contour:
+    contour_type: GTVp
+    contour_save_format: .nii
+    masks_target: ['Lungs','Lesions','Body']
+    union_target: ['Lesions_Lungs']
+
+
+reports:
+  reports_dir: "./reports/"
+  snap: True
