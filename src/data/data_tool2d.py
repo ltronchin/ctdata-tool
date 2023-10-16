@@ -18,7 +18,7 @@ import argparse
 
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
 argparser.add_argument('--save_config', '-s', help='save_config_file', default='./configs/prepare_data2d_saveconfig.yaml')
 
 args = argparser.parse_args()
@@ -76,10 +76,8 @@ def saveCT(patient_dir, cfg, dataset):
             img_voxel, metadatas, rois_dict = util_contour.get_slices_and_masks(ds_seg,
                                                                                 slices_dir=CT_scan_dir,
                                                                                 dataset=dataset)
-
             # Stack all the slices
             img_voxel = np.stack(img_voxel, axis=2)
-
 
 
             # ROIs IDs

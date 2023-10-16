@@ -49,7 +49,7 @@ if __name__ == '__main__':
     dicom_info = Dataset_class.create_dicom_info_report().get_dicom_info()
     patients_list, patients_ids_list = Dataset_class.get_patients_directories()
     # df = pd.DataFrame(columns=dicom_tags + ['patient', 'RC', '#slices']) if dataset_name == 'RC' else pd.DataFrame(columns=dicom_tags + ['patient', '#slices'])
-
+    info_new = []
     for patient_dir in tqdm(patients_list):
         # Check if the current path is a directory
         patient_id = os.path.basename(patient_dir)
@@ -58,8 +58,10 @@ if __name__ == '__main__':
                 # Select name from label file
                 dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
 
-                data = Dataset_class.add_dicom_infos(dicom_files, patient_id)
-                # Append the patient_id and DICOM data to the DataFram
+                data, ds = Dataset_class.add_dicom_infos(dicom_files, patient_id)
+                # Append the patient_id and DICOM data to the DataFrame
+                ds_seg = pydicom.dcmread(seg_files[0])
+                info_new.append(ds.SeriesDescription)
             except AssertionError as e:
                 print(e)
                 print(f'Error in patient_id: {patient_id}')

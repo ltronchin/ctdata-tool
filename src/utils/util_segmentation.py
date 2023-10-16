@@ -16,11 +16,6 @@ from keras.layers import Conv2D, BatchNormalization, Activation, MaxPool2D, Conv
 from keras.models import Model
 
 
-def load_saved_model(path):
-    with CustomObjectScope({'iou': iou, 'dice_coef': dice_coef, 'dice_loss': dice_loss}):
-        model = tf.keras.models.load_model(path)
-
-    return model
 
 def _get_mask_slices_indexes(z, n_max=1):
     count = 0
@@ -93,6 +88,11 @@ def conv_block(input, num_filters):
 
     return x
 
+def load_saved_model(path):
+    with CustomObjectScope({'iou': iou, 'dice_coef': dice_coef, 'dice_loss': dice_loss}):
+        model = tf.keras.models.load_model(path)
+
+    return model
 
 def encoder_block(input, num_filters):
     x = conv_block(input, num_filters)

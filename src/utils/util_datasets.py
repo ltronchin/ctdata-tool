@@ -268,7 +268,7 @@ class ClaroProspective(BaseDataset):
         df_data = pd.DataFrame([data])
         self.dicom_info = pd.concat([self.dicom_info, df_data], ignore_index=True)
 
-        return data
+        return data, ds
 
     def check_stage(self):
 

@@ -14,12 +14,14 @@ print('available accelerator:', tf.test.gpu_device_name())
 
 # DATASETS
 server_data = '/Volumes/T7/data'
-datasets = ['AERTS', 'NSCLC-RadioGenomics']
+datasets = ['NSCLC-RadioGenomics']
 type_of_interpolation = {0:'volumes_I', 1: 'volumes_V'}
 
-# Saved Model UNET:
 trained_model_path = model_path = "./weights/Lung_Segmentation_2D_13E.h5"  # os.path.join(abs_path, "saved_models", f"TFmodel_lung224_21S.h5")
-trained_model = load_saved_model(trained_model_path)
+
+with CustomObjectScope({'iou': iou, 'dice_coef': dice_coef, 'dice_loss': dice_loss}):
+    trained_model = tf.keras.models.load_model(trained_model_path)
+
 
 
 for dataset in datasets:
@@ -30,14 +32,13 @@ for dataset in datasets:
     data_info = pd.read_excel(os.path.join(dataset_I_processed, 'data.xlsx'))
     print(data_info.head())
     if 'NSCLC-RadioGenomics' in dataset:
-
         for name in ['max_bbox_lesions', 'max_bbox_lungs', 'max_bbox_lesions_lungs']:
             data_info[name] = None
 
     # Select volumes with missing lungs segmentation
     selection = [True if 'Lungs' not in eval(ROIS_for_ID) else False for ROIS_for_ID in data_info['ROIs_names']]
     data_info_missing_lungs = data_info[selection]
-
+    print(data_info_missing_lungs.head())
     for ID, index in zip(data_info_missing_lungs['ID'], data_info_missing_lungs.index.tolist()):
 
         patient_directory = os.path.join(dataset_I_processed, ID)
@@ -67,14 +68,15 @@ for dataset in datasets:
             # Emulate Batch Data
 
             image_data = np.array(image)[np.newaxis, :, :, np.newaxis]
-            # INFERENCE
+
+
             pred = trained_model.predict(image_data)
-            # SELECTION AND RESHAPE
+
+
             mask_slice = Image.fromarray(np.array(pred[0, :, :, 0] > 0.5))
             mask_slice = mask_slice.resize((512, 512))
             mask_slice = np.array(mask_slice).astype(np.int8)
             mask_lungs[:, :, z_i] = mask_slice
-
 
         mask_lungs = mask_lungs.astype(np.int8) * 255
 
@@ -127,7 +129,7 @@ for dataset in datasets:
 
         # VOLUME TOT
         volume_sel = volume_array[:,:, selection_slices_with_lungs]
-        volume_nii = nib.Nifti1Image(mask_lungs_sel, nii_volume_.affine, nii_volume_.header)
+        volume_nii = nib.Nifti1Image(volume_sel, nii_volume_.affine, nii_volume_.header)
         nib.save(volume_nii, v_file)
         # LESIONS
 
