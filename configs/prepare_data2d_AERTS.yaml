@@ -1,0 +1,60 @@
+seed: 0
+exp_name:
+
+device:
+  cuda_device: cuda:0
+  gpu_num_workers: 32
+
+data:
+  dataset_name: AERTS
+  img_dir: /Volumes/PhD backup/NSCLC-Radiomics/
+  interim_dir: /Volumes/PhD backup/data/interim/
+  processed_dir: /Volumes/PhD backup/data/processed/
+  info_file: /Volumes/PhD backup/data/interim/AERTS/patients_info.xlsx
+  label_file: /Volumes/PhD backup/NSCLC-Radiomics/AERTS/NSCLC_clinical_2019_10.csv
+  metadata_file: /Volumes/PhD backup/NSCLC-Radiomics/AERTS/metadata.csv
+  clinical_data:
+    information: ['PatientID', 'age', 'clinical.T.Stage', 'Clinical.N.Stage', 'Clinical.M.Stage', 'Overall.Stage', 'Histology', 'gender', 'Survival.time', 'deadstatus.event']
+    "no_rc": 0
+    "rc": 1
+  preprocessing:
+    # resize
+    img_size: 256
+    interpolation: linear
+    # normalization and clip
+    range:
+      min: -1000 # -1200 # -1000
+      max: 1000 # 400 # 1000
+    upper_percentile:
+    lower_percentile:
+    to_255:
+    file_format: .tiff # .pkl
+    save_to_volume: False
+  dicom_tags:
+    - PatientID
+    - PatientName
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
+  contour:
+    contour_type: GTVp
+    contour_save_format: .nii
+    masks_target: ['Lesions', 'Lungs']
+    union_target: ['Lesions_Lungs']
+
+
+reports:
+  reports_dir: "./reports/"
+  snap: True

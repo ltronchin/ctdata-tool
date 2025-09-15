@@ -1,48 +1,45 @@
 import sys
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
-import re
 import os
 import yaml
 import numpy as np
-import pandas as pd
-import glob
 import pydicom
-import dicom2nifti
-import nibabel as nib
 
-from src.utils import util_data
-from src.utils import util_path
+
+
+from src.utils import util_datasets
+
+import argparse
+argparser = argparse.ArgumentParser(description='Prepare data for training')
+argparser.add_argument('-c', '--config',
+                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
+args = argparser.parse_args()
 
 if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data2d_RC.yaml') as file:
+    with open(args.config) as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
     # Parameters
+
     dataset_name = cfg['data']['dataset_name']
-    img_dir = cfg['data']['img_dir']
-    label_file = cfg['data']['label_file']
+    # Dataset Class Selector
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective}
 
-    interim_dir =os.path.join(cfg['data']['interim_dir'], dataset_name)
-    processed_dir = os.path.join(cfg['data']['processed_dir'], dataset_name)
-    reports_dir = os.path.join(cfg['reports']['reports_dir'], dataset_name)
-    img_dir = os.path.join(img_dir, dataset_name)
+    # Initialize dataset class
+    Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
+    Dataset_class.load_dicom_info_report()
 
-
-
-
-    preprocessing = cfg['data']['preprocessing']
-    img_size = preprocessing['img_size']
-    interpolation = preprocessing['interpolation']
-
-    # List all patients in the source directory
-    patients_list = glob.glob(os.path.join(img_dir, "*")) # patient folders
-
-    # Structure dataframe
-
+    # List all patient directories
+    patients_list, patients_ids_list = Dataset_class.get_patients_directories()
     data = []
 
     for patient_dir in patients_list:
@@ -51,57 +48,29 @@ if __name__ == '__main__':
             print("\n")
             print(f"Patient: {patient_dir}")
 
-            # Convert DICOM to NIFTI 3D volume
-            # Create destination directory if not exist
-            # TODO interim_dir_nifti = os.path.join(interim_dir, 'nifti_volumes')
-            #  util_path.create_dir(interim_dir_nifti), this part is not necessary?
-
             # Load idpatient from dicom file
-            dicom_files = glob.glob(os.path.join(patient_dir, 'CT*.dcm'))
-            ds = pydicom.dcmread(dicom_files[0])
-            # Open files
-            seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
-            if 'Girs' in patient_dir:
-                print("Macario")
+
             try:
-                # https://github.com/pydicom/pydicom/issues/961
-                ds_seg = pydicom.dcmread(seg_files[0])
+                # Select name from label file
+                dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
 
-                # Available structures
-                structures = {}
+                ds_seg = pydicom.dcmread(seg_files[0], force=True if 'StrctrSets.dcm' in seg_files[0] else False)
 
-                pattern = re.compile('(^lung[0-9._\s])', re.IGNORECASE)
+                # Get structures
+                patient_fname = getattr(ds_seg, 'PatientID', None)
+                print(f"Patient ID: {patient_fname}")
+                # TODO add patient_fname to the dataset Labels and remove patient names
+                structures, rois_classes = Dataset_class.get_structures_names(ds_seg).get_structures_and_classes()
 
-                for item in ds_seg.StructureSetROISequence:
-                    name = item.ROIName
-                    if "polmone " in name.lower():
-                        structures[item.ROINumber] = item.ROIName
-                    elif pattern.search(name):
-                        structures[item.ROINumber] = item.ROIName
-                    elif "corpo" in name.lower():
-                        structures[item.ROINumber] = item.ROIName
-                    elif "body" in name.lower():
-                        structures[item.ROINumber] = item.ROIName
-                    elif re.search("^CTV[0-9]{0,1}", name.upper())  is not None:
-                        structures[item.ROINumber] = item.ROIName
-                    elif "external" in name.lower():
-                        structures[item.ROINumber] = item.ROIName
-                    else:
-                        continue
-                if len(structures) == 0:
-                    print("No structures found")
-                else:
-                    print("Available structures: ", structures)
-                # Add structures to dataframe
-                data.append({'patient_dir': patient_dir, 'structures': structures})
+
+                # Add data structures
+                Dataset_class.label_change_name_to_ID(name=os.path.basename(patient_dir), id=patient_fname)
+                Dataset_class.add_data_structures(patient_dir=patient_dir, structures=structures, rois_classes=rois_classes)
 
             except Exception as e:
+                Dataset_class.drop_patient(os.path.basename(patient_dir))
                 print(e)
-                print("No segmentation file found")
-    df = pd.DataFrame(data)
-    if not os.path.exists(interim_dir):
-        os.makedirs(interim_dir)
-
-    df.to_excel(os.path.join(interim_dir, 'structures.xlsx'), index=False)
-
+    # Create Save
+    Dataset_class.create_save_structures_report()
+    Dataset_class.save_clinical()
     print("May the force be with you")

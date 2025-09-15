@@ -11,8 +11,8 @@ import operator
 import warnings
 import math
 
-# https://github.com/KeremTurgutlu/dicom-contour/blob/master/dicom_contour/contour.py
 
+# https://github.com/KeremTurgutlu/dicom-contour/blob/master/dicom_contour/contour.py
 
 
 def parse_dicom_file(filename):
@@ -35,10 +35,11 @@ def parse_dicom_file(filename):
             slope = 0.0
 
         if intercept != 0.0 and slope != 0.0:
-            dcm_image = dcm_image*slope + intercept
+            dcm_image = dcm_image * slope + intercept
         return dcm_image
     except InvalidDicomError:
         return None
+
 
 def get_roi_contour_ds(rt_sequence, index):
     """
@@ -64,7 +65,7 @@ def get_roi_contour_ds(rt_sequence, index):
     return contours
 
 
-def contour2poly(contour_dataset, path):
+def contour2poly(contour_dataset, path, dataset):
     """
     Given a contour dataset (a DICOM class) and path that has .dcm files of
     corresponding images return polygon coordinates for the contours.
@@ -73,6 +74,8 @@ def contour2poly(contour_dataset, path):
         contour_dataset (dicom.dataset.Dataset) : DICOM dataset class that is identified as
                          (3006, 0016)  Contour Image Sequence
         path (str): path of directory containing DICOM images
+        img_IF (str): name of the dataset
+        dataset_name (str): name of the dataset
 
     Return:
         pixel_coords (list): list of tuples having pixel coordinates
@@ -81,15 +84,15 @@ def contour2poly(contour_dataset, path):
     """
 
     contour_coord = contour_dataset.ContourData
+    img_SOP = contour_dataset.ContourImageSequence[0].ReferencedSOPInstanceUID
+    slice_file = dataset.get_slice_file(path, img_SOP=img_SOP)
     # x, y, z coordinates of the contour in mm
-    coord = []
-    for i in range(0, len(contour_coord), 3):
-        coord.append((contour_coord[i], contour_coord[i + 1], contour_coord[i + 2]))
 
+    coord, img_id_or = dataset.get_coord(contour_coord, img_SOP)
     # extract the image id corresponding to given countour
     # read that dicom file
-    img_ID = contour_dataset.ContourImageSequence[0].ReferencedSOPInstanceUID
-    img = dicom.read_file(path + img_ID + '.dcm')
+
+    img = dicom.read_file(slice_file)
     img_arr = img.pixel_array
     img_shape = img_arr.shape
 
@@ -100,8 +103,8 @@ def contour2poly(contour_dataset, path):
     origin_x, origin_y, _ = img.ImagePositionPatient
 
     # y, x is how it's mapped
-    pixel_coords = [(np.ceil((x - origin_x) / x_spacing), np.ceil((y - origin_y) / y_spacing)) for x, y, _ in coord]
-    return pixel_coords, img_ID, img_shape
+    pixel_coords = [(np.ceil((x - origin_x) / x_spacing), np.ceil((y - origin_y) / y_spacing)) for x, y, _ in coord] if coord else None
+    return pixel_coords, img_id_or, img_shape
 
 
 def poly_to_mask(polygon, width, height):
@@ -122,11 +125,12 @@ def poly_to_mask(polygon, width, height):
     return mask
 
 
-def get_mask_dict(contour_datasets, path):
+def get_mask_dict(contour_datasets, path, img_id, **kwargs):
     """
     Inputs:
         contour_datasets (list): list of dicom.dataset.Dataset for contours
         path (str): path of directory with images
+        img_id (str): img ID name for the slice
 
     Return:
         img_contours_dict (dict): img_id : contour array pairs
@@ -138,13 +142,38 @@ def get_mask_dict(contour_datasets, path):
     img_contours_dict = defaultdict(int)
 
     for cdataset in contour_datasets:
-        coords, img_id, shape = contour2poly(cdataset, path)
-        mask = poly_to_mask(coords, *shape)
+        coords, img_id, shape = contour2poly(cdataset, path, img_id, **kwargs)
+        mask = poly_to_mask(coords, *shape) if coords else np.zeros(shape).astype(bool)
         img_contours_dict[img_id] += mask
 
     return img_contours_dict
 
-def slice_order(path):
+
+def create_mask_dict(contour_datasets, path, **kwargs):
+    """
+    Inputs:
+        contour_datasets (list): list of dicom.dataset.Dataset for contours
+        path (str): path of directory with images
+        img_id (str): img ID name for the slice
+
+    Return:
+        img_contours_dict (dict): img_id : contour array pairs
+    """
+
+    from collections import defaultdict
+
+    # create empty dict for
+    img_contours_dict = defaultdict(int)
+
+    for cdataset in contour_datasets:
+        coords, img_id, shape = contour2poly(cdataset, path, **kwargs)
+        mask = poly_to_mask(coords, *shape) if coords else np.zeros(shape).astype(bool)
+        img_contours_dict[img_id] += mask
+
+    return img_contours_dict
+
+
+def slice_order(path, dataset):
     """
     Takes path of directory that has the DICOM images and returns
     a ordered list that has ordered filenames
@@ -154,23 +183,12 @@ def slice_order(path):
         ordered_slices: ordered tuples of filename and z-position
     """
     # handle `/` missing
-    if path[-1] != '/': path += '/'
-    slices = []
-    for s in os.listdir(path):
-        try:
-            f = dicom.read_file(path + '/' + s)
-            f.ImagePositionPatient # to ensure not to read contour file
-            assert f.Modality != 'RTDOSE'
-            slices.append(f)
-        except:
-            continue
+    slices_dict, slices_dict_path = dataset.get_slices_dict(slices_dir=path)
+    ordered_slices = sorted(slices_dict.items(), key=operator.itemgetter(1))
 
-    slice_dict = {s.SOPInstanceUID: s.ImagePositionPatient[-1] for s in slices}
-    ordered_slices = sorted(slice_dict.items(), key=operator.itemgetter(1))
-    return ordered_slices
+    dataset.set_slices_dict(ordered_slices)
 
-
-
+    return ordered_slices, slices_dict_path
 
 
 def get_img_mask_voxel(slice_orders, mask_dict, image_path):
@@ -197,6 +215,7 @@ def get_img_mask_voxel(slice_orders, mask_dict, image_path):
         img_voxel.append(img_array)
         mask_voxel.append(mask_array)
     return img_voxel, mask_voxel
+
 
 def get_roi_names(contour_data):
     """

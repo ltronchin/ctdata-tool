@@ -1,0 +1,58 @@
+seed: 0
+exp_name:
+
+device:
+  cuda_device: cuda:0
+  gpu_num_workers: 32
+
+data:
+  dataset_name: Claro_Pro
+
+  img_dir:  /Volumes/PhD backup/CLARO DATA/Claro_Pro/III_stg/RT_CT
+  interim_dir:  /Volumes/PhD backup/data/interim/
+  processed_dir:  /Volumes/PhD backup/data/processed/
+  info_file:  /Volumes/PhD backup/data/interim/Claro_Pro/patients_info.xlsx
+  label_file:  /Volumes/PhD backup/CLARO DATA/Claro_Pro/III_stg/Features_cliniche_III_CLARO.xlsx
+  metadata_file: None
+
+  classes:
+    "adaptive": 1
+    "non-adaptive": 2
+  preprocessing:
+    # resize
+    img_size: 256
+    interpolation: linear
+    # normalization and clip
+    range:
+      min: -1000 # -1200 # -1000
+      max: 1000 # 400 # 1000
+    upper_percentile:
+    lower_percentile:
+    to_255:
+    file_format: .tiff # .pkl
+  dicom_tags:
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
+  contour:
+    contour_type: GTVp
+    contour_save_format: .nii
+    masks_target: ['Lungs','Lesions','Body']
+    union_target: ['Lesions_Lungs']
+
+
+reports:
+  reports_dir: "./reports/"
+  snap: True

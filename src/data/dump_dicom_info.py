@@ -1,4 +1,7 @@
 import sys
+
+from src.utils import util_datasets
+
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
 
@@ -9,67 +12,60 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
+
+
+import argparse
+argparser = argparse.ArgumentParser(description='Prepare data for training')
+argparser.add_argument('-c', '--config',
+                       help='configuration file path', default='./configs/prepare_data2d_AIDA.yaml')
+args = argparser.parse_args()
+
+
+
+
+
 if __name__ == '__main__':
 
     # Config file
     print("Upload configuration file")
-    with open('./configs/prepare_data2d_RC.yaml') as file:
+    with open(args.config) as file:
         cfg = yaml.load(file, Loader=yaml.FullLoader)
 
-    # Parameters
-    img_dir = cfg['data']['img_dir']
-    label_file = cfg['data']['label_file']
     dataset_name = cfg['data']['dataset_name']
-    interim_dir =os.path.join(cfg['data']['interim_dir'], dataset_name)
-    processed_dir = os.path.join(cfg['data']['processed_dir'], dataset_name)
-    reports_dir = os.path.join(cfg['reports']['reports_dir'], dataset_name)
-    dicom_tags = cfg['data']['dicom_tags']
+    # Dataset Class Selector
+    dataset_class_selector = {
+        'NSCLC-RadioGenomics': util_datasets.NSCLCRadioGenomics,
+        'AERTS': util_datasets.AERTS,
+        'RC': util_datasets.RECO,
+        'Claro_Retro': util_datasets.ClaroRetrospective,
+        'Claro_Pro': util_datasets.ClaroProspective,
+        'AIDA_CT': util_datasets.AIDA}
 
-    # Load label file
-    df_labels = pd.read_excel(label_file)
-    # Select label column
-    df_labels = df_labels[['Nome paziente', 'Risposta Completa (0 no, 1 si)']]
 
-    # List all patient directories
-    patient_list = os.listdir(img_dir)
+    # Initialize dataset class
+    Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
+    Dataset_class.create_check_directories()
 
-    # Prepare an empty DataFrame to hold the information
-    df = pd.DataFrame(columns=['patient', 'RC']+dicom_tags)
-
-    for patient in tqdm(patient_list):
-        patient_dir = os.path.join(img_dir, patient)
+    # Create an empty DataFrame
+    dicom_info = Dataset_class.create_dicom_info_report().get_dicom_info()
+    patients_list, patients_ids_list = Dataset_class.get_patients_directories()
+    assert len(patients_list) == len(patients_ids_list), "Mismatch between patients_list and patients_ids_list lengths"
+    # df = pd.DataFrame(columns=dicom_tags + ['patient', 'RC', '#slices']) if dataset_name == 'RC' else pd.DataFrame(columns=dicom_tags + ['patient', '#slices'])
+    info_new = []
+    for patient_dir, patient_id in tqdm(zip(patients_list, patients_ids_list), total=len(patients_list)):
         # Check if the current path is a directory
+
         if os.path.isdir(patient_dir):
+            # Select name from label file
+            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=cfg['data']['get_segmentation'])
 
-            try:
-                # Select name from label file
-                label = df_labels.loc[df_labels['Nome paziente'] == patient, 'Risposta Completa (0 no, 1 si)'].values[0]
-            except IndexError:
-                print(f'Patient {patient} not found in label file')
-                break
-
-            try:
-                # List all .dcm files in the patient directory
-                dicom_files = glob.glob(os.path.join(patient_dir, 'CT*.dcm'))
-                dicom_files.sort()
-
-                # Read the first DICOM file in the directory and extract the DICOM tags
-                ds = pydicom.dcmread(dicom_files[0])
-                data = {
-                    tag: getattr(ds, tag, None) for tag in dicom_tags
-                }
-                # Add patient and label to data dict
-                data['patient'] = patient
-                data['RC'] = label
-
-                # Append the patient and DICOM data to the DataFrame
-                df.loc[len(df)] = data
-            except:
-                print(f'Error in patient: {patient}')
+            data, ds = Dataset_class.add_dicom_infos(dicom_files, patient_id)
 
     # Save DataFrame to a CSV file
-    if not os.path.exists(interim_dir):
-        os.makedirs(interim_dir)
-    df.to_excel(os.path.join(interim_dir, 'patients_info.xlsx'), index=False)
+
+    # Save Dicom info report
+    Dataset_class.save_dicom_info_report()
+
+
 
 print("May the force be with you")

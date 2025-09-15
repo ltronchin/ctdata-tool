@@ -4,14 +4,14 @@ import pickle
 import shutil
 from copy import deepcopy
 import imageio
-from scipy import interpolate
+from scipy import interpolate, ndimage
 import random
+
+
 from nilearn.image import new_img_like
 import nibabel as nib
 import matplotlib.pyplot as plt
-from src.utils import util_path
-from src.utils import util_sitk
-from src.utils.util_dicom import set_padding_to_air
+from src.utils import util_path, util_sitk
 import struct
 import numpy as np
 
@@ -105,7 +105,151 @@ def load_volumes_with_names(file_path):
 
 
 
-def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1]):
+def save_slices(volume, directory, index_start):
+    for z_index in range(volume.shape[2]):
+        # Slice file creation
+        slice_number = index_start + z_index
+        slice_file = os.path.join(directory, f'{slice_number}_slice.nii.gz')
+        # Slice extraction
+        slice = volume[:, :, z_index]
+        # Save slice as nifti
+        affine = np.eye(4)
+        ni_img = nib.Nifti1Image(slice, affine=affine)
+        nib.save(ni_img, slice_file)
+        # increase slice number
+        slice_number += 1
+
+
+
+def save_volume_as_nifti(volume, directory, affine, **kwargs):
+    volume_file = os.path.join(directory, f'volume.nii.gz')
+    # Slice extraction
+    # Save slice as nifti
+    if affine is None:
+        affine = np.eye(4)
+
+    nii_img = nib.Nifti1Image(volume, affine=affine)
+
+    nii_ras = nib.as_closest_canonical(nii_img)
+
+    nib.save(nii_ras, volume_file)
+
+
+
+def save_ct_scan(save_volume=False, **kwargs):
+
+    if save_volume:
+        save_volume_as_nifti(**kwargs)
+    else:
+        save_slices(**kwargs)
+
+
+
+
+
+
+
+def set_padding_to_air(image, padding_value=-1000, change_value="lower", new_value=-1000):
+    """
+    This function sets the padding (contour of the dicom image) to the padding value. It trims all the values below the
+    padding value and sets them to this value.
+
+    Parameters
+    ----------
+    image: numpy.array
+        Image to modify.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    image: numpy.array
+        Modified image.
+
+    """
+
+    trim_map = image < padding_value
+    options = {"greater": ~trim_map, "lower": trim_map}
+    image[options[change_value]] = new_value
+
+    return image
+
+
+
+
+def transform_to_HU(slice, intercept, slope):
+    """
+    This function transforms to Hounsfield units all the images passed.
+
+    Parameters
+    ----------
+    slice: numpy.Array
+        List of metadatas of the slices where to gather the information needed in the transformation.
+    intercept: scalar number
+        Intercept of the slice.
+    slope: scalar number
+        Slope of the slice.
+    padding_value: scalar number
+        Value to use as threshold in the trim process and to be set in those points.
+    change_value: string, says if the values to be changed are greater or lower than the padding value.
+    new_value: scalar number, value to be set in the points where the change_value is True.
+
+    Returns
+    -------
+    images: numpy array
+        transformed slice in HU with the padding set to the padding value.
+    """
+    intercept = np.float32(intercept)
+    slope = np.float32(slope)
+    slice = slice.astype("float32")
+
+    if slope != 1:
+
+        slice = slope * slice.astype("float32")
+        slice = slice.astype("float32")
+    slice += np.float32(intercept)
+
+    return slice
+
+
+def interpolate_z_axis(image, slices_spacing, target_spacing=3, is_mask=False):
+
+    # Compute the resampling factor for the z-axis
+    resampling_factor_z = slices_spacing / target_spacing
+
+
+    min_, counts = np.unique(image.shape, return_counts=True)
+    z_slices = [val for val in min_ if val != 512][0]
+
+
+    n_rows = 512
+    n_columns = 512
+
+
+    x = np.arange(0, n_rows, 1)
+    y = np.arange(0, n_columns, 1)
+    z = np.arange(0, z_slices, 1)
+
+
+    xnew = np.arange(0, n_rows, 1)
+    ynew = np.arange(0, n_columns, 1)
+    z_new = np.arange(0, z_slices // resampling_factor_z)
+
+
+
+
+
+    # Compute the new depth after resampling
+    new_depth = int(image.shape[0] * resampling_factor_z)
+
+    # Resample the volume along the z-axis using scipy.ndimage.zoom
+    resampled_volume = ndimage.zoom(image, (1, 1, resampling_factor_z), mode='nearest')
+
+    # Print the dimensions of the original and resampled volumes
+    return resampled_volume
+def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1], is_mask=False):
     """
     This function interpolates a slice of a patient, given its metadata and the index of the z coordinate, in order to
     obtain a pixel spacing = 1 along x and y.
@@ -118,6 +262,7 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
         CT image.
     index_z_coord: int, default 2
         Index of the coordinate of the z axis.
+    is_mask: bool, default False
 
     Returns
     -------
@@ -149,15 +294,21 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
     xnew = np.arange(0, n_rows, target_planar_spacing[0])
     ynew = np.arange(0, n_columns, target_planar_spacing[1])
 
-    f = interpolate.interp2d(x, y, single_slice, kind="quintic", fill_value=-1000)
-    interpolated_slice = f(xnew, ynew)
+
+    if is_mask:
+        myInterpolator = interpolate.NearestNDInterpolator(np.concatenate([x[:,None],y[:,None]], 1), single_slice)
+        interpolated_slice = myInterpolator(xnew, ynew)
+    else:
+
+        f = interpolate.interp2d(x, y, single_slice, kind="quintic", fill_value=-1000)
+        interpolated_slice = f(xnew, ynew)
 
 
     return interpolated_slice
 
 
-def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False,
-                         z_spacing=1, is_mask=False):
+def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_planar_spacing=[1, 1], interpolate_z=False, original_spacing=1,
+                         z_spacing=3, is_mask=False, **kwargs):
     """
     This function interpolates the slices of a patient.
 
@@ -177,22 +328,43 @@ def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_plana
         volume_output[:, :, z_i] = interpolate_slice_2D(metadata=patient_dcm_info,
                                                         single_slice=volume[:, :, z_i],
                                                         index_z_coord=index_z_coord,
-                                                        target_planar_spacing=target_planar_spacing
+                                                        target_planar_spacing=target_planar_spacing,
+                                                        is_mask=is_mask
                                                         )
         if is_mask:
             volume_output[:, :, z_i] = volume_output[:, :, z_i] > 122.5
-            volume_output[:, :, z_i] = volume_output[:, :, z_i].astype(np.int8) * 255
+            volume_output[:, :, z_i] = volume_output[:, :, z_i].astype(np.uint8)
+    if interpolate_z:
+        volume_output = interpolate_z_axis(volume, original_spacing, z_spacing)
+        if is_mask:
+            for z_i in range(volume_output.shape[index_z_coord]):
+                volume_output[:, :, z_i] = volume_output[:, :, z_i] > 200.5
 
-    # TODO OPTION TO INTERPOLATE Z
-    # Set padding to air
     if not is_mask:
-        set_padding_to_air(volume_output, padding_value=-1000, change_value="lower", new_value=-1000)
+        return volume_output.astype(np.float32)
     else:
         return volume_output.astype(np.uint8)
 
 
 
-def create_gif(volume, save_file):
+def clip_slice_window(slice, level, window):
+    """
+   Level is the
+   Function to display an image slice
+   Input is a numpy 2D array
+
+    Parameters:
+    :param slice: input 2D array
+    :param level: The Window Level (WL) refers to the window centre or midpoint HU value that is represented on the window setting.
+    :param window: The window Width (WW) is the measure of the range of CT numbers that a CT image contains.
+
+   """
+    max = level + (window / 2)
+    min = level - (window / 2)
+    slice = slice.clip(min, max)
+    return slice
+
+def create_gif(volume, save_file, is_mask=False, fps=10):
     # Assume your CT volume is stored as a 3D NumPy array called 'volume'
     # The dimensions are (depth, height, width)
 
@@ -205,17 +377,19 @@ def create_gif(volume, save_file):
     # Iterate over the slices and convert them to RGB images (for visualization purposes)
     for slice in slices:
         # Normalize the slice to the range [0, 255]
-        # slice_normalized = ((slice - np.min(slice)) / (np.max(slice) - np.min(slice))) * 255
-        slice = slice > 0.5
+
+        slice = ((slice - np.min(slice)) / (np.max(slice) - np.min(slice))) * 255 if not is_mask else slice
+
+        slice = slice > 0.5 if is_mask else slice
         # Convert the 2D slice to an RGB image (grayscale)
-        slice_rgb = np.repeat(slice[:, :, np.newaxis], 3, axis=2).astype(int) * 255
+        slice_rgb = np.repeat(slice[:, :, np.newaxis], 3, axis=2)
 
         # Append the RGB image to the frames list
         frames.append(slice_rgb.astype(np.uint8))
 
     # Save the frames as a GIF file
 
-    imageio.mimsave('./figures/ct_volume_{}.gif'.format(save_file), frames, duration=10)
+    imageio.mimsave('./figures/ct_volume_{}.gif'.format(save_file), frames, duration=fps)
 
 
 def visualize_nifti(outdir, image, opt=None):
@@ -315,121 +489,3 @@ def iter_volumes(source_dir):
     return len(patients_list), iterate_images()
 
 
-def to_file(source: str, dest: str, file_format, is_visualize=True):
-    num_files, input_iter = open_image_folder_patients(source)  # Core function.
-
-    for idx, image in enumerate(input_iter):
-
-        img = image["img"]
-        img_fname = image["name"]
-        folder_name = image["folder_name"]
-        archive_fname = f"{folder_name}/{img_fname}.tiff"
-
-        util_path.create_dir(os.path.join(dest, f"{folder_name}"))
-
-        dest_path = os.path.join(dest, archive_fname)
-
-        if random.uniform(0, 1) > 0.1:
-            if is_visualize:
-                visualize(img)
-
-def write_to_zip(
-        source:                     str,
-        dest:                      str,
-        dataset:                    str = "RC",
-        max_patients:               int = 100000,
-):
-
-    def add_to_zip(zipObj, patient):
-        files = glob.glob(os.path.join(patient, "*.pickle"))
-        if len(files) == 0:
-            files = glob.glob(os.path.join(patient, "*.png"))
-
-        print(f">> Writing {patient} to zip file")
-        for file in files:
-            filename = os.path.join(
-                util_path.get_filename_without_extension(patient),
-                util_path.get_filename(file),
-            )
-            # Add file to zip
-            zipObj.write(file, filename)
-
-    # Get all patients in temp folder.
-    patients = glob.glob(os.path.join(source, "*[!json]"))
-
-    # Get only the names of patients.
-    patients = [util_path.get_filename_without_extension(patient) for patient in patients]
-    assert len(patients) > 0
-
-    # Create a basename depending on <dataset>, <num_patient>
-    max_patients = min(max_patients, len(patients))
-    basename = f"{dataset}-num-{max_patients:d}"
-
-    # Shuffle and take max_patients samples from dataset.
-    patients = sorted(patients)
-    random.Random(max_patients).shuffle(patients)  # comment this line if you don't want to change the order fo the patients across the experiments
-    sample_patients = patients[:max_patients]
-
-    # Init zip file.
-    out_path = os.path.join(dest, f"{basename}.zip",)
-
-    # Write to zip
-    with zipfile.ZipFile(out_path, "w") as zipObj:
-        for p in sample_patients:
-            patient_path = os.path.join(source, p)
-            add_to_zip(zipObj, patient_path)
-
-def open_dataset_patient(source, transpose_img):
-    if os.path.isdir(source):
-        return iter_volumes(source, transpose_img)
-    elif os.path.isfile(source):
-        assert False, "unknown archive type"
-    else:
-        error(f"Missing input file or directory: {source}")
-
-def to_pickle(
-        source: str,
-        dest: str,
-        transpose_img: bool = True,
-        is_overwrite: bool = False,
-        is_visualize: bool =False
-):
-    def visualize(x):
-        plt.imshow(x, cmap="gray", vmin=x.min(), vmax=x.max())
-        plt.show()
-
-    def write_pickle(data, path):
-        with open(path, 'wb') as handle:
-            pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-    # Open normalized folder.
-    num_files, input_iter = open_dataset_patient(source, transpose_img) # Core function.
-
-    # Create a temp folder to be save into zipfile
-    temp = os.path.join(dest, "temp")
-
-    if os.path.isdir(temp) and is_overwrite:
-        print(f"Removing {temp}")
-        shutil.rmtree(temp)
-    util_path.create_dir(temp)
-
-    for idx, image in enumerate(input_iter):
-        folder_name = image["folder_name"] # patient name
-        idx_name = image["name"]
-        archive_fname = f"{folder_name}/{idx_name}.pickle"
-        util_path.create_dir(os.path.join(temp, f"{folder_name}"))
-        out_path = os.path.join(temp, archive_fname)
-
-        img = image["img"]
-
-        # Transform may drop images.
-        if img is None:
-            break
-
-        # Sanity check
-        if random.uniform(0, 1) > 0.9:
-            if is_visualize:
-                visualize(img)
-
-        # Save the dict as a pickle.
-        write_pickle(img, out_path)
