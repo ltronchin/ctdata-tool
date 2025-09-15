@@ -22,7 +22,7 @@ argparser.add_argument('-i', '--interpolate_xy', action='store_true',
                        help='debug mode', default=False)
 args = argparser.parse_args()
 
-pandarallel.initialize(nb_workers=6, progress_bar=True)
+pandarallel.initialize(nb_workers=4, progress_bar=True)
 
 
 def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset):
@@ -42,22 +42,25 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
             dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=True)
             if 'CC18047936' in patient_dir:
                 seg_files = [seg_files[2]]
+
             dataset.set_filename_to_SOP_dict(dicom_files)
 
 
 
             # Open files
-            ds_seg = pydicom.dcmread(seg_files[0])
-            ds = pydicom.dcmread(dicom_files[0])
+            ds_seg = pydicom.dcmread(seg_files[0], force=True)
+            ds = pydicom.dcmread(dicom_files[0], force=True)
 
             # Select id_patient
-            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=patient_dir)
 
+
+            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=patient_dir)
+            dataset.set_instant_ID(patient_fname)
             # Create the patient directory for masks
 
             mask_dir = dataset.get_mask_dir()
             patient_path = os.path.join(mask_dir, patient_fname)
-
+            print(patient_path)
             # Create the patient directory for masks
             util_path.create_replace_existing_path(patient_path, force=True, create=True)
 
@@ -91,9 +94,10 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
             slice_thickness = dicom_info_patient.loc['SliceThickness'].values[0]
             interpolate_z = False
             if slice_thickness != 3.0:
-                interpolate_z = True
+                pass
+            interpolate_z = True
             dict_final_masks_interpolated = {mask_name :util_data.interpolation_slices(dicom_info_patient,
-                                                                                       dict_final_masks[mask_name],
+                                                                                       dict_final_masks[mask_name].astype(int),
                                                                                        index_z_coord=2,
                                                                                        target_planar_spacing=[1, 1],
                                                                                        interpolate_z=interpolate_z,
@@ -127,7 +131,10 @@ def elaborate_patient_volume(patient_dir, cfg, dataset=util_datasets.BaseDataset
 
     except AssertionError as e:
         print('AssertionError\n', 'Patient: ', os.path.basename(patient_dir), '\n', e)
-        shutil.rmtree(patient_path)
+        if 'no lesion found' in str(e).lower():
+            shutil.rmtree(patient_path)
+
+
     except AttributeError as ae:
         print('AttributeError\n', 'Patient: ', os.path.basename(patient_dir), '\n', ae)
         shutil.rmtree(patient_path)
@@ -173,7 +180,7 @@ if __name__ == '__main__':
 
     # Parallelize the elaboration of each patient
     # CC19026796, CC19004775
-    #elaborate_patient_volume(patients_list[35], cfg=cfg, dataset=Dataset_class) # For debugging
-    pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
+    elaborate_patient_volume(patients_list[51], cfg=cfg, dataset=Dataset_class) # For debugging
+    #pd.Series(patients_list).parallel_apply(elaborate_patient_volume, cfg=cfg, dataset=Dataset_class)
 
     print("May the force be with you")

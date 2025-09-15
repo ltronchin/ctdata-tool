@@ -8,11 +8,11 @@ device:
 data:
   dataset_name: Claro_Pro
 
-  img_dir: /Volumes/T7/CLARO DATA/Claro_Pro/III_stg/RT_CT
-  interim_dir: /Volumes/T7/data/interim/
-  processed_dir: /Volumes/T7/data/processed/
-  info_file: /Volumes/T7/data/interim/Claro_Pro/patients_info.xlsx
-  label_file: /Volumes/T7/CLARO DATA/Claro_Pro/III_stg/CLARO_PRO_III_CLINIC_23_08_31.xlsx
+  img_dir:  /Volumes/PhD backup/CLARO DATA/Claro_Pro/III_stg/RT_CT
+  interim_dir:  /Volumes/PhD backup/data/interim/
+  processed_dir:  /Volumes/PhD backup/data/processed/
+  info_file:  /Volumes/PhD backup/data/interim/Claro_Pro/patients_info.xlsx
+  label_file:  /Volumes/PhD backup/CLARO DATA/Claro_Pro/III_stg/Features_cliniche_III_CLARO.xlsx
   metadata_file: None
 
   classes:

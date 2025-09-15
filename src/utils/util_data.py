@@ -6,6 +6,8 @@ from copy import deepcopy
 import imageio
 from scipy import interpolate, ndimage
 import random
+
+
 from nilearn.image import new_img_like
 import nibabel as nib
 import matplotlib.pyplot as plt
@@ -119,13 +121,18 @@ def save_slices(volume, directory, index_start):
 
 
 
-def save_volume_as_nifti(volume, directory, **kwargs):
+def save_volume_as_nifti(volume, directory, affine, **kwargs):
     volume_file = os.path.join(directory, f'volume.nii.gz')
     # Slice extraction
     # Save slice as nifti
-    affine = np.eye(4)
-    ni_img = nib.Nifti1Image(volume, affine=affine)
-    nib.save(ni_img, volume_file)
+    if affine is None:
+        affine = np.eye(4)
+
+    nii_img = nib.Nifti1Image(volume, affine=affine)
+
+    nii_ras = nib.as_closest_canonical(nii_img)
+
+    nib.save(nii_ras, volume_file)
 
 
 
@@ -172,7 +179,7 @@ def set_padding_to_air(image, padding_value=-1000, change_value="lower", new_val
 
 
 
-def transform_to_HU(slice, intercept, slope, padding_value=-1000, change_value="lower", new_value=-1000):
+def transform_to_HU(slice, intercept, slope):
     """
     This function transforms to Hounsfield units all the images passed.
 
@@ -207,20 +214,42 @@ def transform_to_HU(slice, intercept, slope, padding_value=-1000, change_value="
     return slice
 
 
-def interpolate_z_axis(image, slices_spacing, target_spacing=3):
+def interpolate_z_axis(image, slices_spacing, target_spacing=3, is_mask=False):
 
     # Compute the resampling factor for the z-axis
     resampling_factor_z = slices_spacing / target_spacing
+
+
+    min_, counts = np.unique(image.shape, return_counts=True)
+    z_slices = [val for val in min_ if val != 512][0]
+
+
+    n_rows = 512
+    n_columns = 512
+
+
+    x = np.arange(0, n_rows, 1)
+    y = np.arange(0, n_columns, 1)
+    z = np.arange(0, z_slices, 1)
+
+
+    xnew = np.arange(0, n_rows, 1)
+    ynew = np.arange(0, n_columns, 1)
+    z_new = np.arange(0, z_slices // resampling_factor_z)
+
+
+
+
 
     # Compute the new depth after resampling
     new_depth = int(image.shape[0] * resampling_factor_z)
 
     # Resample the volume along the z-axis using scipy.ndimage.zoom
-    resampled_volume = ndimage.zoom(image, (1, 1, resampling_factor_z), order=3)
+    resampled_volume = ndimage.zoom(image, (1, 1, resampling_factor_z), mode='nearest')
 
     # Print the dimensions of the original and resampled volumes
     return resampled_volume
-def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1]):
+def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_spacing=[1, 1], is_mask=False):
     """
     This function interpolates a slice of a patient, given its metadata and the index of the z coordinate, in order to
     obtain a pixel spacing = 1 along x and y.
@@ -233,6 +262,7 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
         CT image.
     index_z_coord: int, default 2
         Index of the coordinate of the z axis.
+    is_mask: bool, default False
 
     Returns
     -------
@@ -264,8 +294,14 @@ def interpolate_slice_2D(metadata, single_slice, index_z_coord=2, target_planar_
     xnew = np.arange(0, n_rows, target_planar_spacing[0])
     ynew = np.arange(0, n_columns, target_planar_spacing[1])
 
-    f = interpolate.interp2d(x, y, single_slice, kind="quintic", fill_value=-1000)
-    interpolated_slice = f(xnew, ynew)
+
+    if is_mask:
+        myInterpolator = interpolate.NearestNDInterpolator(np.concatenate([x[:,None],y[:,None]], 1), single_slice)
+        interpolated_slice = myInterpolator(xnew, ynew)
+    else:
+
+        f = interpolate.interp2d(x, y, single_slice, kind="quintic", fill_value=-1000)
+        interpolated_slice = f(xnew, ynew)
 
 
     return interpolated_slice
@@ -292,19 +328,24 @@ def interpolation_slices(patient_dcm_info, volume, index_z_coord=2, target_plana
         volume_output[:, :, z_i] = interpolate_slice_2D(metadata=patient_dcm_info,
                                                         single_slice=volume[:, :, z_i],
                                                         index_z_coord=index_z_coord,
-                                                        target_planar_spacing=target_planar_spacing
+                                                        target_planar_spacing=target_planar_spacing,
+                                                        is_mask=is_mask
                                                         )
         if is_mask:
             volume_output[:, :, z_i] = volume_output[:, :, z_i] > 122.5
-            volume_output[:, :, z_i] = volume_output[:, :, z_i].astype(np.int8) * 255
-
+            volume_output[:, :, z_i] = volume_output[:, :, z_i].astype(np.uint8)
     if interpolate_z:
         volume_output = interpolate_z_axis(volume, original_spacing, z_spacing)
+        if is_mask:
+            for z_i in range(volume_output.shape[index_z_coord]):
+                volume_output[:, :, z_i] = volume_output[:, :, z_i] > 200.5
 
     if not is_mask:
         return volume_output.astype(np.float32)
     else:
         return volume_output.astype(np.uint8)
+
+
 
 def clip_slice_window(slice, level, window):
     """
@@ -448,20 +489,3 @@ def iter_volumes(source_dir):
     return len(patients_list), iterate_images()
 
 
-def to_file(source: str, dest: str, file_format, is_visualize=True):
-    num_files, input_iter = open_image_folder_patients(source)  # Core function.
-
-    for idx, image in enumerate(input_iter):
-
-        img = image["img"]
-        img_fname = image["name"]
-        folder_name = image["folder_name"]
-        archive_fname = f"{folder_name}/{img_fname}.tiff"
-
-        util_path.create_dir(os.path.join(dest, f"{folder_name}"))
-
-        dest_path = os.path.join(dest, archive_fname)
-
-        if random.uniform(0, 1) > 0.1:
-            if is_visualize:
-                visualize(img)

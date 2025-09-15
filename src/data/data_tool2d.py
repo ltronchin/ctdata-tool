@@ -2,6 +2,7 @@ import sys
 
 from pandarallel import pandarallel
 
+
 print('Python %s on %s' % (sys.version, sys.platform))
 sys.path.extend(["./"])
 
@@ -10,7 +11,6 @@ import os
 import yaml
 import numpy as np
 import pandas as pd
-import glob
 import pydicom
 from src.utils import util_data, util_path, util_contour, util_datasets
 
@@ -18,13 +18,12 @@ import argparse
 
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_RG.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_AIDA.yaml')
 argparser.add_argument('--save_config', '-s', help='save_config_file', default='./configs/prepare_data2d_saveconfig.yaml')
 
 args = argparser.parse_args()
 
 pandarallel.initialize(nb_workers=6, progress_bar=True)
-
 
 def saveCT(patient_dir, cfg, dataset):
     """
@@ -35,6 +34,7 @@ def saveCT(patient_dir, cfg, dataset):
     :return:
     """
     # Output file for bbox, directories, labels for all the patients
+
     info_patients_final = list()
     # Patient Information Dicom
     dicom_info_df = dataset.load_dicom_info_report().get_dicom_info()
@@ -43,27 +43,46 @@ def saveCT(patient_dir, cfg, dataset):
         if os.path.isdir(patient_dir):
             final_info_patient = dict()
             # Load idpatient from dicom file
-            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=True)
+            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = dataset.get_dicom_files(patient_dir=patient_dir, segmentation_load=cfg['data']['get_segmentation'])
 
             dataset.set_filename_to_SOP_dict(dicom_files)
 
             # Open files
-            ds_seg = pydicom.dcmread(seg_files[0])
-            ds = pydicom.dcmread(dicom_files[0])
+            if seg_files is not None:
+                ds_seg = pydicom.dcmread(seg_files[0], force=True)
+            else:
+                ds_seg=None
+            ds = pydicom.dcmread(dicom_files[0], force=True)
 
             # Select id_patient
-            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=patient_dir)
+            patient_fname = dataset.get_IDpatient(ds=ds, patient_dir=CT_scan_dir)
+            # Check mask directory:
+            Dataset_class.check_mask_dir(patient_id=patient_fname, segmentation_load=cfg['data']['get_segmentation'])
+
+
             final_info_patient['ID'] = patient_fname
             # Create patient folders
             slices_dir = dataset.get_slices_dir()
-            mask_dir = dataset.get_mask_dir()
+            if cfg['data']['get_segmentation']:
+                mask_dir = dataset.get_mask_dir()
 
-            # Select only slices that contains the lungs, if there is the lungs mask in the dataset
-            if not os.path.exists(mask_dir):
-                raise AssertionError('There is not the folder')
-            masks_file = os.path.join(mask_dir, patient_fname, f'Masks_interpolated_{patient_fname}_.pkl.gz')
-            bbox_file = os.path.join(mask_dir, patient_fname, f'bboxes_interpolated_{patient_fname}.xlsx')
-            bbox_df = pd.read_excel(bbox_file).rename(columns={'Unnamed: 0': 'ROI_id'})
+                # Select only slices that contains the lungs, if there is the lungs mask in the dataset
+                if not os.path.exists(mask_dir):
+                    raise AssertionError('There is not the folder')
+                masks_file = os.path.join(mask_dir, patient_fname, f'Masks_interpolated_{patient_fname}_.pkl.gz')
+                bbox_file = os.path.join(mask_dir, patient_fname, f'bboxes_interpolated_{patient_fname}.xlsx')
+                bbox_df = pd.read_excel(bbox_file).rename(columns={'Unnamed: 0': 'ROI_id'})
+                # ROIs IDs
+                ROIS_ids = bbox_df.loc[:, 'ROI_id'].tolist()
+                # [*0] If there are musk lungs in the dataset select the slices in the volume that contains lungs
+                # Get masks
+                masks_dataset = util_data.load_volumes_with_names(masks_file)
+            else:
+                mask_dir = None
+                masks_file = None
+                bbox_df = pd.DataFrame(columns=['ROI_id', 'Structure', 'bbox_lungs', 'bbox_lesions', 'bbox_lesions_lungs'])
+                ROIS_ids =[]
+            # Create patient directory
 
             patient_dir_processed = os.path.join(slices_dir, patient_fname)
             patient_images_dir_path = os.path.join(patient_dir_processed)
@@ -73,24 +92,17 @@ def saveCT(patient_dir, cfg, dataset):
             dicom_info_patient = dicom_info_df.loc[patient_fname].to_frame()
 
             # Create mask volume for each ROI
+
             img_voxel, metadatas, rois_dict = util_contour.get_slices_and_masks(ds_seg,
                                                                                 slices_dir=CT_scan_dir,
                                                                                 dataset=dataset)
             # Stack all the slices
             img_voxel = np.stack(img_voxel, axis=2)
 
-
-            # ROIs IDs
-            ROIS_ids = bbox_df.loc[:, 'ROI_id'].tolist()
-            # [*0] If there are musk lungs in the dataset select the slices in the volume that contains lungs
-
-            # Get masks
-            masks_dataset = util_data.load_volumes_with_names(masks_file)
-            masks_target = list(masks_dataset.keys())
             # Number of slices original
             number_of_CT_slices_original = img_voxel.shape[2]
             final_info_patient['#slices_original'] = number_of_CT_slices_original
-
+            masks_target = cfg['data']['contour']['masks_target']
             if 'Lungs' in masks_target:
                 # Select only slices with the lungs inside
 
@@ -108,14 +120,15 @@ def saveCT(patient_dir, cfg, dataset):
 
                 for mask_class in masks_target:
                     # Replace the mask volume with the reduced one
-                    masks_dataset[mask_class] = masks_dataset[mask_class][:, :, selection_slices_with_lungs]
+                    masks_dataset[mask_class] = (masks_dataset[mask_class][:, :, selection_slices_with_lungs] > 0.5).astype(np.uint8)
                 # ROIs IDs only lungs slices
                 ROIS_ids = bbox_df.loc[selection_slices_with_lungs, 'ROI_id'].tolist()
+                final_info_patient['slices_in'] = ROIS_ids[0]
+                final_info_patient['slices_fin'] = ROIS_ids[1]
             HU_voxel = np.zeros(img_voxel.shape, dtype=np.float32)
             # ROIs IDs
-            final_info_patient['slices_in'] = ROIS_ids[0]
-            final_info_patient['slices_fin'] = ROIS_ids[1]
-            final_info_patient['ROIs_names'] = list(masks_dataset.keys())
+            final_info_patient['ROIs_names'] = masks_target
+
 
             # ---------------------------------------- PREPROCESSING ----------------------------------------
             # [1] Rescale to HU
@@ -126,21 +139,30 @@ def saveCT(patient_dir, cfg, dataset):
                 # Get slice
                 slice_pixel_array = img_voxel[:, :, z_i]
                 # Rescale to HU and padding air
+                window_center = preprocessing['window']['center']
+                window_width = preprocessing['window']['width']
+                min_value = -1000
+                max_value = window_center + window_width // 2
+
+
                 slice_HU = util_data.transform_to_HU(slice=slice_pixel_array,
                                                      intercept=slice_intercept,
-                                                     slope=slice_slope,
-                                                     padding_value=cfg['data']['preprocessing']['range']['min'],
-                                                     change_value="lower",
-                                                     new_value=cfg['data']['preprocessing']['range']['min'])
+                                                    slope=slice_slope,
+                                                     )
 
                 # [2] Clipping HU values
                 # Clip HU values
-                slice_HU = slice_HU.clip(preprocessing['range']['min'], preprocessing['range']['max'])
+
+                slice_HU = slice_HU.clip(min_value, max_value)
                 # Reassemble the volume
                 HU_voxel[:, :, z_i] = slice_HU
 
+            # Rotate the volume of 90 degrees
+            HU_voxel = np.rot90(HU_voxel, k=1, axes=(1, 0))
+            HU_voxel = np.flip(HU_voxel, axis=0)
+
             # [3] INTERPOLATION: Interpolate the volume such to obtain a pixel spacing [1 mm , 1 mm], if the parameter
-            # interpolate_z is True the target spacing is [1 mm, 1 mm, 1 mm]
+            # interpolate_z is True the target spacing is [1 mm, 1 mm, 3 mm]
             if cfg['interpolate_v']:
                 pass
             else:
@@ -148,6 +170,7 @@ def saveCT(patient_dir, cfg, dataset):
                 interpolate_z = False
                 if slice_thickness != 3.0:
                     interpolate_z = True
+
 
                 HU_int_voxel = util_data.interpolation_slices(dicom_info_patient,
                                                               HU_voxel,
@@ -159,7 +182,8 @@ def saveCT(patient_dir, cfg, dataset):
                                                               )
 
             # [4] Set padding to the minimum clipping value
-            HU_int_voxel = util_data.set_padding_to_air(HU_int_voxel, padding_value=preprocessing['range']['min'], new_value=preprocessing['range']['min'])
+
+            HU_int_voxel = util_data.set_padding_to_air(HU_int_voxel, padding_value=min_value, new_value=min_value)
             if 'Lungs' in masks_target:
                 HU_int_voxel = HU_int_voxel[:,:, selection_slices_with_lungs]
             # [*5] If there is the body mask in the dataset intersect the volume with the body mask
@@ -185,7 +209,9 @@ def saveCT(patient_dir, cfg, dataset):
                 ni_img = nb.Nifti1Image(mask_volume, affine=affine)
                 nb.save(ni_img, mask_file_reduced)
 
-            util_data.save_ct_scan(**dict(index_start=ROIS_ids[0]), volume=HU_int_voxel, directory=patient_images_dir_path, save_volume=cfg['save_volume'])
+            affine = np.diag([1, 1, slice_thickness, 1])
+
+            util_data.save_ct_scan(**dict(volume=HU_int_voxel, directory=patient_images_dir_path, save_volume=cfg['save_volume'], affine=affine))
 
             # Add patient information to the final list
 
@@ -227,15 +253,17 @@ if __name__ == '__main__':
         'AERTS': util_datasets.AERTS,
         'RC': util_datasets.RECO,
         'Claro_Retro': util_datasets.ClaroRetrospective,
-        'Claro_Pro': util_datasets.ClaroProspective}
+        'Claro_Pro': util_datasets.ClaroProspective,
+        'AIDA_CT': util_datasets.AIDA}
+
 
     Dataset_class = dataset_class_selector[dataset_name](cfg=cfg)
     Dataset_class.initialize_slices_saving()
     Dataset_class.load_dicom_info_report()
 
     # List all patient directories
-    patients_list, _ = Dataset_class.get_patients_directories()
-    # Parallelize the elaboration of each patient
+    patients_list, patient_ids = Dataset_class.get_patients_directories()
+    # Parallelize te elaboration of each patient
 
     #info_patients_final = saveCT(patients_list[52], cfg=cfg, dataset=Dataset_class)  # DEBUG
     # CC19026796

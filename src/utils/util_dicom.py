@@ -183,11 +183,12 @@ def slice_order(path, dataset):
         ordered_slices: ordered tuples of filename and z-position
     """
     # handle `/` missing
-    slices_dict = dataset.get_slices_dict(slices_dir=path)
+    slices_dict, slices_dict_path = dataset.get_slices_dict(slices_dir=path)
     ordered_slices = sorted(slices_dict.items(), key=operator.itemgetter(1))
+
     dataset.set_slices_dict(ordered_slices)
 
-    return ordered_slices
+    return ordered_slices, slices_dict_path
 
 
 def get_img_mask_voxel(slice_orders, mask_dict, image_path):

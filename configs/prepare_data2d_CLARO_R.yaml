@@ -8,11 +8,11 @@ device:
 data:
   dataset_name: Claro_Retro
 
-  img_dir: /Volumes/T7/CLARO DATA/Claro_Retro
-  interim_dir: /Volumes/T7/data/interim/
-  processed_dir: /Volumes/T7/data/processed/
-  info_file: /Volumes/T7/data/interim/Claro_Retro/patients_info.xlsx
-  label_file: /Volumes/T7/CLARO DATA/Claro_Retro/CLARO_retrospettivo_clinical_db.xlsx
+  img_dir:  /Volumes/PhD backup/CLARO DATA/Claro_Retro
+  interim_dir:  /Volumes/PhD backup/data/interim/
+  processed_dir:  /Volumes/PhD backup/data/processed/
+  info_file:  /Volumes/PhD backup/data/interim/Claro_Retro/patients_info.xlsx
+  label_file:  /Volumes/PhD backup/CLARO DATA/Claro_Retro/CLARO_retrospettivo_clinical_db.xlsx
   metadata_file: None
 
   classes:

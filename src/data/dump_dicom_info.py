@@ -17,7 +17,7 @@ from tqdm import tqdm
 import argparse
 argparser = argparse.ArgumentParser(description='Prepare data for training')
 argparser.add_argument('-c', '--config',
-                       help='configuration file path', default='./configs/prepare_data2d_CLARO_P.yaml')
+                       help='configuration file path', default='./configs/prepare_data2d_AIDA.yaml')
 args = argparser.parse_args()
 
 
@@ -38,7 +38,8 @@ if __name__ == '__main__':
         'AERTS': util_datasets.AERTS,
         'RC': util_datasets.RECO,
         'Claro_Retro': util_datasets.ClaroRetrospective,
-        'Claro_Pro': util_datasets.ClaroProspective}
+        'Claro_Pro': util_datasets.ClaroProspective,
+        'AIDA_CT': util_datasets.AIDA}
 
 
     # Initialize dataset class
@@ -48,24 +49,17 @@ if __name__ == '__main__':
     # Create an empty DataFrame
     dicom_info = Dataset_class.create_dicom_info_report().get_dicom_info()
     patients_list, patients_ids_list = Dataset_class.get_patients_directories()
+    assert len(patients_list) == len(patients_ids_list), "Mismatch between patients_list and patients_ids_list lengths"
     # df = pd.DataFrame(columns=dicom_tags + ['patient', 'RC', '#slices']) if dataset_name == 'RC' else pd.DataFrame(columns=dicom_tags + ['patient', '#slices'])
     info_new = []
-    for patient_dir in tqdm(patients_list):
+    for patient_dir, patient_id in tqdm(zip(patients_list, patients_ids_list), total=len(patients_list)):
         # Check if the current path is a directory
-        patient_id = os.path.basename(patient_dir)
+
         if os.path.isdir(patient_dir):
-            try:
-                # Select name from label file
-                dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
+            # Select name from label file
+            dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=cfg['data']['get_segmentation'])
 
-                data, ds = Dataset_class.add_dicom_infos(dicom_files, patient_id)
-                # Append the patient_id and DICOM data to the DataFrame
-                ds_seg = pydicom.dcmread(seg_files[0])
-                info_new.append(ds.SeriesDescription)
-            except AssertionError as e:
-                print(e)
-                print(f'Error in patient_id: {patient_id}')
-
+            data, ds = Dataset_class.add_dicom_infos(dicom_files, patient_id)
 
     # Save DataFrame to a CSV file
 

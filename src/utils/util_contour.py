@@ -3,7 +3,7 @@ import pydicom
 from src.utils import util_dicom
 import cv2
 from skimage import measure
-
+import cv2
 
 def Volume_mask_and_original(volume_original, volume_mask, fill=-1000):
     """
@@ -100,7 +100,7 @@ def Volume_mask_and_or_mask(mask_one, mask_two, OR=True):
     return final_mask
 
 
-def get_slices_and_masks(ds_seg, roi_names=[], slices_dir=str, dataset=None):
+def get_slices_and_masks(ds_seg=None, roi_names=[], slices_dir=str, dataset=None):
     """
     This function returns the slices and the mask of a specific roi all ordered by the
     Patient Image Position inside the dicom metadata.
@@ -113,23 +113,27 @@ def get_slices_and_masks(ds_seg, roi_names=[], slices_dir=str, dataset=None):
              voxel_by_rois: dictionary of the ordered mask voxel for each roi
     """
 
-    slice_orders = util_dicom.slice_order(slices_dir, dataset)
+    slice_orders, slice_dict_path = util_dicom.slice_order(slices_dir, dataset)
     # Load slices :
     img_voxel = []
     metadatas = []
 
     voxel_by_rois = {name: [] for name in roi_names}
-    voxel_by_rois_ids = dataset.create_voxels_by_rois(ds_seg, roi_names, slices_dir, number_of_slices=len(slice_orders)).get_voxel_by_rois()
-    # REMOVE ANY NULL ROI
-    for roi_name, volume in voxel_by_rois_ids.items():
-        if len(volume) == 0:
-            voxel_by_rois.pop(roi_name)
-    roi_names = list(voxel_by_rois.keys())
+    if ds_seg:
+        voxel_by_rois_ids = dataset.create_voxels_by_rois(ds_seg, roi_names, slices_dir, number_of_slices=len(slice_orders)).get_voxel_by_rois()
+        # REMOVE ANY NULL ROI
+        for roi_name, volume in voxel_by_rois_ids.items():
+            if len(volume) == 0:
+                voxel_by_rois.pop(roi_name)
+        roi_names = list(voxel_by_rois.keys())
+    else:
+        voxel_by_rois_ids = {}
+        roi_names = []
     for img_id, _ in slice_orders:
         # Load the image dcm
 
-        slice_file = dataset.get_slice_file(slices_dir, img_id=img_id)
-        dcm_ = pydicom.dcmread(slice_file)
+        slice_file = slice_dict_path[img_id]
+        dcm_ = pydicom.dcmread(slice_file, force=True)
         metadatas.append(dcm_)
         # Get the image array
         img_array = dcm_.pixel_array.astype(np.float32)
@@ -211,3 +215,23 @@ def get_bounding_boxes(volume, z_index=2):
 def get_maximum_bbox_over_slices(list_bboxes):
     return [int(np.min([bbox[0] for bbox in list_bboxes])), int(np.min([bbox[1] for bbox in list_bboxes])), int(np.max([bbox[2] for bbox in list_bboxes])),
             int(np.max([bbox[3] for bbox in list_bboxes]))]
+
+
+def create_mask_with_largest_contours(image, number_of_contours=1):
+    # Apply a threshold to get a binary mask
+    _, thresh = cv2.threshold(image, 2, 255, cv2.THRESH_BINARY)
+
+    # Find contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Sort contours by area and take as many as needed
+    sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    if len(sorted_contours) > number_of_contours:
+        sorted_contours = sorted_contours[:number_of_contours]
+
+    # Create an empty mask with the same dimensions as 'image'
+    mask = np.zeros(image.shape, dtype=np.uint8)
+
+    # Fill the largest contours on the mask
+    cv2.drawContours(mask, sorted_contours, -1, color=255, thickness=cv2.FILLED)
+    return mask

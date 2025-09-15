@@ -1,5 +1,6 @@
 import nibabel as nib
 from src.utils import util_contour
+from src.utils.util_contour import create_mask_with_largest_contours
 from src.utils.util_segmentation import *
 from keras.utils import CustomObjectScope
 seed = 42
@@ -62,6 +63,11 @@ for dataset in datasets:
         mask_lungs = np.zeros(volume_array.shape).astype(np.int8)
         # Image:
 
+
+
+
+
+
         for z_i in range(volume_array.shape[2]):
             image = Image.fromarray(volume_array[:, :, z_i])
             image = image.resize((224, 224))
@@ -75,13 +81,34 @@ for dataset in datasets:
 
             mask_slice = Image.fromarray(np.array(pred[0, :, :, 0] > 0.5))
             mask_slice = mask_slice.resize((512, 512))
-            mask_slice = np.array(mask_slice).astype(np.int8)
-            mask_lungs[:, :, z_i] = mask_slice
+            mask_slice = np.array(mask_slice).astype(np.uint8) * 255
+            #
+            #   do create mask with top two areas inside the mask
+            #
+            if z_i == 40:
+                pass
+            if mask_slice.max() > 0:
 
-        mask_lungs = mask_lungs.astype(np.int8) * 255
+                mask_lungs[:, :, z_i] = create_mask_with_largest_contours(mask_slice)
+
+            else:
+                mask_lungs[:, :, z_i] = mask_slice
+            #
+            # do intersection between lungs and inverted lesion mask
+            #
+            if lesion_array[:, :, z_i].max() > 0 and mask_slice.max() > 0:
+                lesion_array_bool = lesion_array[:, :, z_i].astype(bool)
+                mask_slice_bool = mask_slice.astype(bool)
+                mask_lungs[:, :, z_i] = (~np.bitwise_and(~lesion_array_bool, mask_slice_bool)).astype(np.uint8) * 255
+                mask_lungs[:, :, z_i] = (mask_lungs[:, :, z_i] >= 0)
+
+
+        # Create mask lungs and convert to
+        mask_lungs = mask_lungs.astype(np.uint8) * 255
 
         # Create Intersection:
         volume_lesion_lungs = util_contour.Volume_mask_and_or_mask(mask_lungs > 0.5, lesion_array > 0.5, OR=True)
+
         volume_lesion_lungs = volume_lesion_lungs.astype(np.int8) * 255
 
         # Save bounding box report INTERPOLATED BODY
@@ -102,38 +129,54 @@ for dataset in datasets:
             [bbox_df for bbox_df in bbox_masks_int.values()],
             axis=1)
 
-        selection_slices_with_lungs = [True if bbox != [0, 0, 0, 0] else False for bbox in df_interpolated['bbox_lungs'] ]
+
+        df_interpolated['block'] = np.array([bbox == [0, 0, 0, 0] for bbox in df_interpolated['bbox_lungs'].tolist()]).astype(int)
+        df_interpolated['sequence_change'] = df_interpolated['block'].diff().ne(0).astype(int)
+        df_interpolated['group'] = df_interpolated['sequence_change'].cumsum()
+
+
+        # Find the sequence with the maximum length
+        count_series = df_interpolated.loc[~df_interpolated['block'] != 0, 'group'].value_counts()
+
+        max_group = count_series.idxmax()
+        max_length = count_series.max()
+        # Find the starting index of this sequence
+        start_index = df_interpolated[df_interpolated['group'] == max_group].index[0]
+
+
         dict_max_bbox = {
-            f'max_bbox_{mask_class.lower()}': util_contour.get_maximum_bbox_over_slices([bbox for bbox in df_interpolated.loc[selection_slices_with_lungs,
-            f'bbox_{mask_class.lower()}'].tolist() if sum(bbox) != 0]) for mask_class in dict_final_mask.keys()
+            f'max_bbox_{mask_class.lower()}': util_contour.get_maximum_bbox_over_slices([bbox for bbox in df_interpolated.loc[start_index: start_index + max_length,
+                                                                            f'max_bbox_{mask_class.lower()}'].tolist() if
+                                                                                         sum(bbox) != 0]) for mask_class in dict_final_mask.keys()
 
         }
         for key in dict_max_bbox.keys():
             data_info.loc[index, key] = str(dict_max_bbox[key])
-        data_info.loc[index, '#slices_lungs_only'] = int(len([0 for i in selection_slices_with_lungs if i]))
+        data_info.loc[index, '#slices_lungs_only'] = max_length
 
-        first_slices_lung = [i for i, slice in enumerate(selection_slices_with_lungs) if slice]
-        data_info.loc[index, 'slices_in'] = first_slices_lung[0]
-        data_info.loc[index, 'slices_fin'] = first_slices_lung[0] + 1
+        first_slices_lung = start_index
+
+        data_info.loc[:, 'slices_in'] = first_slices_lung
+        data_info.loc[index, 'slices_fin'] = first_slices_lung + max_length
         data_info.loc[index, 'ROIs_names'] = str(list(dict_final_mask.keys()))
 
         # Save new volumes:
         # LUNGS
-        mask_lungs_sel = mask_lungs[:,:,selection_slices_with_lungs]
+        mask_lungs_sel = mask_lungs[:,:,start_index: start_index + max_length]
         mask_lungs_nii = nib.Nifti1Image(mask_lungs_sel, nii_lesion_.affine, nii_lesion_.header)
         nib.save(mask_lungs_nii, lu_file)
         # LESIONS-LUNGS
-        volume_lesion_lungs_sel = volume_lesion_lungs[:, :, selection_slices_with_lungs]
+        volume_lesion_lungs_sel = volume_lesion_lungs[:, :, start_index: start_index + max_length]
         mask_lungs_lesion_nii = nib.Nifti1Image(volume_lesion_lungs_sel, nii_lesion_.affine, nii_lesion_.header)
         nib.save(mask_lungs_lesion_nii, lu_le_file)
 
         # VOLUME TOT
-        volume_sel = volume_array[:,:, selection_slices_with_lungs]
+        volume_sel = volume_array[:,:, start_index: start_index + max_length]
         volume_nii = nib.Nifti1Image(volume_sel, nii_volume_.affine, nii_volume_.header)
         nib.save(volume_nii, v_file)
         # LESIONS
 
-        lesion_sel = lesion_array[:, :, selection_slices_with_lungs]
+        lesion_sel = lesion_array[:, :, start_index: start_index + max_length]
         lesion_nii = nib.Nifti1Image(lesion_sel, nii_lesion_.affine, nii_lesion_.header)
         nib.save(lesion_nii, le_file)
 

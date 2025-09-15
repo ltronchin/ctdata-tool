@@ -64,6 +64,12 @@ class BaseDataset(object):
         else:
             self.labels = pd.read_excel(self.label_file) if self.label_file.endswith('.xlsx') else pd.read_csv(self.label_file, sep=';')
 
+    def label_change_name_to_ID(self, name, id):
+        pass
+
+    def drop_patient(self, patient_name):
+        pass
+
     def get_label(self):
         return self.labels
 
@@ -137,11 +143,11 @@ class BaseDataset(object):
     def get_mask_dir(self):
         return self.mask_dir
 
-
     def get_IDpatient(self, ds=None, patient_dir=None):
         patient_fname = getattr(ds, 'PatientID', None)
         assert patient_fname is not None, "Patient ID not found"
         return patient_fname
+
     @staticmethod
     def roi_volume_stacking(roi_mask):
         return np.stack(roi_mask, axis=2) > 0.5
@@ -159,7 +165,8 @@ class BaseDataset(object):
         raise NotImplementedError(f"The method get_patients_directories is not implemented for the child class: {self.__class__.__name__}")
 
     def add_data_structures(self, patient_dir, structures, rois_classes):
-        self.data_structures.append({'patient_dir': patient_dir, 'structures': structures, 'rois_classes': list(np.unique(rois_classes))})
+        self.data_structures.append({'patient_dir': patient_dir, 'id': os.path.basename(patient_dir), 'CRA': self.ID_to_CRAS_dict[os.path.basename(patient_dir)],
+                                     'structures': structures, 'rois_classes': list(np.unique(rois_classes))})
 
     def add_dicom_infos(self, dicom_files, patient_id):
         dicom_files.sort()
@@ -173,7 +180,13 @@ class BaseDataset(object):
 
         self.dicom_info.loc[len(self.dicom_info)] = data
 
-        return data
+        return data, ds
+
+    def check_mask_dir(self, patient_id, segmentation_load=False):
+        if not segmentation_load:
+            return None
+        if not os.path.exists(os.path.join(self.mask_dir, patient_id)):
+            raise Exception(f"Mask directory for patient {patient_id} not found")
 
     def save_clinical(self):
         raise NotImplementedError(f"The method save_clinical is not implemented for the child class: {self.__class__.__name__}")
@@ -226,22 +239,26 @@ class BaseDataset(object):
         return coord, img_id
 
 
-class ClaroProspective(BaseDataset):
+
+class AIDA(BaseDataset):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-        self.CRAs_labels = None
+        self.instant_ID = None
         self.IDs_labels = None
+        self.img_raw_dir = cfg['data']['img_dir']
     def load_dicom_info_report(self):
         self.dicom_info = pd.read_excel(os.path.join(self.interim_dir, 'patients_info.xlsx')).set_index('PatientID')
         self.dicom_info.index = self.dicom_info.index.astype(str)
         return self
-    def get_ID_from_CRA(self, CRA):
-        if CRA in self.IDs_labels:
-            return CRA
-        ID_ = self.labels[self.labels['CRA'] == CRA]['ID paziente'].values[0] if len(self.labels[self.labels['CRA'] == CRA]) > 0 else None
-        ID_patient = ID_ if ID_ is not None else CRA
-        return ID_patient
+    def set_instant_ID(self, ID_):
+        self.instant_ID = ID_
+
+    def get_ID_from_CRA(self, ID_):
+        if eval(ID_) in self.IDs_labels:
+            return ID_
+        else:
+            raise Exception(f"Patient {ID_} not found")
 
     def create_dicom_info_report(self):
         self.dicom_info = pd.DataFrame(columns=self.dicom_tags + ['#slices', 'PatientID'])
@@ -254,7 +271,7 @@ class ClaroProspective(BaseDataset):
         dicom_files.sort()
         # Read the first DICOM file in the directory and extract the DICOM tags
 
-        ds = pydicom.dcmread(dicom_files[0])
+        ds = pydicom.dcmread(dicom_files[0], force=True )
         data = {
             tag: getattr(ds, tag, None) for tag in self.dicom_tags
         }
@@ -273,84 +290,66 @@ class ClaroProspective(BaseDataset):
     def check_stage(self):
 
         # Select labels
-        self.labels.columns = [self.labels.iloc[1, 0], *self.labels.iloc[0, 1:].tolist()]
-        self.labels = self.labels.drop([0, 1]).reset_index(drop=True)
+        if self.labels is not None:
 
-        CRAs_labels = self.labels['CRA'].values
-        IDs_labels = self.labels['ID paziente'].values
+            IDs_labels = self.labels['ID paziente'][self.labels['CT'] == 1].values
 
-        final_id = []
-        for id_, CRA in zip(IDs_labels, CRAs_labels):
-            if CRA in self.patient_ids:
-                final_id.append(CRA)
-            elif id_ in self.patient_ids:
-                final_id.append(id_)
-            else:
-                final_id.append(None)
-        final_id = [id_ for id_ in final_id if id_ is not None]
-        ids_ = []
-        id_dirs = []
-        opposite_dirs = []
-        opposite_ids = []
-        for id_dir in self.patient_paths:
-            id = os.path.basename(id_dir)
-            if id in final_id:
-                ids_.append(id)
-                id_dirs.append(id_dir)
-            else:
-                opposite_dirs.append(id_dir)
-                opposite_ids.append(id)
+            for id_label in IDs_labels:
+                if str(id_label) not in self.patient_ids:
+                    raise Exception(f"Patient {id_label} not found")
 
-        # Update patient_ids and patient_paths
-        self.patient_ids = ids_
-        self.patient_paths = id_dirs
-        # Update labels
-        labels_selection = [True if id_ in self.patient_ids or CRA in self.patient_ids else False for id_, CRA in zip(IDs_labels, CRAs_labels)]
-        self.labels = self.labels[labels_selection].reset_index(drop=True)
-        # Add CRAs and IDs as attributes of the class
-        self.CRAs_labels = self.labels['CRA'].values
-        self.IDs_labels = self.labels['ID paziente'].values
-
+            self.IDs_labels = IDs_labels
+            self.patient_ids = [id_ for id_ in self.patient_ids if id_ in [str(i) for i in IDs_labels]]
+            self.patient_paths = [id_path for id_path in self.patient_paths if os.path.basename(id_path) in self.patient_ids]
     def get_patients_directories(self):
         patient_list_accepted = os.listdir(self.img_raw_dir)
         self.patient_paths = [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.img_raw_dir) if Id in patient_list_accepted and '.' not in Id]
         self.patient_ids = [os.path.basename(patient_path) for patient_path in self.patient_paths]
+        # In the first dir there is a date
+
         self.check_stage()
 
+        last_study_path = []
+        for p in self.patient_paths:
+            admitted_paths= [path for path in os.listdir(p) if not path.startswith('.')]
+            if len(admitted_paths) == 1:
+                date_dir = os.path.join(p, admitted_paths[0])
+                last_study_path.append(date_dir)
+
+        self.patient_paths = last_study_path
         return self.patient_paths, self.patient_ids
 
     def load_label(self):
         if self.label_file is None:
             self.labels = None
         else:
-            self.labels = pd.read_excel(self.label_file) if self.label_file.endswith('.xlsx') else pd.read_csv(self.label_file, sep=';')
+            self.labels = pd.read_excel(self.label_file ) if self.label_file.endswith('.xlsx') else pd.read_csv(self.label_file, sep=';')
+
 
     def get_dicom_files(self, patient_dir, segmentation_load=False):
         # List all .dcm files in the patient directory
-        if os.path.basename(patient_dir) != 'CC20015557':
-            CT_files = glob.glob(os.path.join(patient_dir, 'CT*.dcm'))
-            if segmentation_load:
-                seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
-                assert len(seg_files) > 0, "No segmentation file found"
-                return CT_files, patient_dir, seg_files, patient_dir
-            else:
-                return CT_files, patient_dir, None, None
+
+        CT_dir = os.path.join(patient_dir, 'data_CT')
+        assert os.path.isdir(CT_dir), f"Patient directory {CT_dir} not found"
+
+        CT_files = glob.glob(os.path.join(CT_dir, "*.[dD][cC][mM]"))
+        assert len(CT_files) > 0, f"Patient directory empty: {CT_dir}"
+        if segmentation_load:
+
+            SEG_dir = os.path.join(patient_dir, 'segmentation')
+            assert os.path.isdir(SEG_dir), f"Segmentation directory {SEG_dir} not found"
+            seg_files = glob.glob(os.path.join(SEG_dir, '*RS.dcm'))
+            assert len(seg_files) > 0, "No segmentation file found"
+            return CT_files, CT_dir, seg_files, SEG_dir
         else:
-            CT_files = glob.glob(os.path.join(patient_dir, 'Polmone', '81852614_CT*'))
-            if segmentation_load:
-                seg_files = glob.glob(os.path.join(patient_dir, 'Polmone', '*StrctrSets.dcm'))
-                assert len(seg_files) > 0, "No segmentation file found"
-                return CT_files, patient_dir, seg_files, patient_dir
-            else:
-                return CT_files, patient_dir, None, None
-            pass
+            return CT_files, CT_dir, None, None
 
     def get_structures_names(self, ds_seg):
 
         # Initialize structures ROIS names
         self.initialize_rois()
         # Available structures
-        finder = ['Lesions'  for item in ds_seg.StructureSetROISequence if re.search("^CTV[0-9]{0,1}", item.ROIName.upper()) or 'tumor' in item.ROIName.lower()]
+        finder = ['Lesions' for item in ds_seg.StructureSetROISequence if re.search("^CTV[0-9]{0,1}", item.ROIName.upper()) or 'tumor' in item.ROIName.lower()]
         self.finder_lesions = finder
         for item in ds_seg.StructureSetROISequence:
             name = item.ROIName
@@ -386,35 +385,310 @@ class ClaroProspective(BaseDataset):
                 print(f"Error in {roi_name}", ' ---ERROR: ', a)
                 continue
         return self
+
     def get_IDpatient(self, ds=None, patient_dir=None):
         id_ = os.path.basename(patient_dir)
-        return self.get_ID_from_CRA(id_)
-
-
+        parent_2_up = os.path.abspath(os.path.join(patient_dir, "..", ".."))
+        if eval(os.path.basename(parent_2_up)) in self.IDs_labels:
+            id_ = os.path.basename(parent_2_up)
+        else:
+            raise Exception(f"Patient {id_} not found")
+        return id_
 
     def matching_rois(self, roi_name=None):
 
         pattern_lungs = re.compile('polmoni$', re.IGNORECASE)
 
         roi_name = roi_name.lower()
+        dict_rois_custom_handmade = eval(self.structures_custom.loc[eval(self.instant_ID),'structures'])
+        if roi_name in [roi.lower() for roi in list(dict_rois_custom_handmade.values())]:
+
+            if "polmone" in roi_name.lower():
+                return True, 'Lungs'
+            elif 'tumor' in roi_name.lower():
+                return True, 'Lesions'
+            elif re.search('(^lung[_\s])', roi_name.lower()) is not None:
+                return True, 'Lungs'
+            elif pattern_lungs.search(roi_name):
+                return True, 'Lungs'
+            elif "corpo" in roi_name.lower():
+                return True, 'Body'
+            elif "body" in roi_name.lower():
+                return True, 'Body'
+            elif re.search("mediastino", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif re.search("parete", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif re.search("ctv", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif "external" in roi_name.lower():
+                return True, 'Body'
+            else:
+                return False, None
+        else:
+            return False, None
+
+    def save_clinical(self):
+
+        self.labels.set_index('ID paziente').to_csv(os.path.join(self.interim_dir, 'clinical_data.csv'))
+
+    def get_rois_name_dict(self):
+        pattern_lung = [re.compile('(^lung[-_\s])', re.IGNORECASE), re.compile('(^polmone[\s])', re.IGNORECASE), re.compile('(^lungs[-_\s])', re.IGNORECASE)]
+        pattern_body = [re.compile('(^body[\s])', re.IGNORECASE), re.compile('(^corpo[\s])', re.IGNORECASE),
+                        re.compile('(^external[\s])', re.IGNORECASE)]
+        pattern_ctv = [re.compile('^ctv[0-9]{0,1}', re.IGNORECASE)]
+        pattern_gtv = [re.compile('(^gtv[0-9-_\s])', re.IGNORECASE)]
+
+        self.rois_name_dict = {'lung': pattern_lung, 'body': pattern_body, 'ctv': pattern_ctv, 'gtv': pattern_gtv}
+
+    def get_slices_dict(self, slices_dir):
+        if slices_dir[-1] != '/': slices_dir += '/'
+        slices = []
+        for s in [p for p in os.listdir(slices_dir) if not p.startswith('.')]:
+            try:
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
+                f.ImagePositionPatient  #
+                assert f.Modality != 'RTDOSE'
+                slices.append(f)
+            except:
+                continue
+        slice_dict = {s.SOPInstanceUID: s.ImagePositionPatient[-1] for s in slices}
+        slice_dict_path = {s.SOPInstanceUID: s.filename for s in slices}
+
+        return slice_dict, slice_dict_path
+
+    def get_slice_file(self, slices_dir, img_id=None, img_SOP=None):
+        img_id = img_SOP if img_id is None else img_id
+        img_SOP = img_id if img_SOP is None else img_SOP
+
+        CT_dir_and_name = slices_dir + "/CT."
+        return CT_dir_and_name + img_id + ".dcm"
+
+    def set_filename_to_SOP_dict(self, CT_files):
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
+        self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
+
+    def get_SOP_FILENAME(self, img_id):
+        return img_id, img_id
 
 
-        if "polmone" in roi_name.lower():
-            return True, 'Lungs'
-        elif 'tumor' in roi_name.lower():
-            return True, 'Lesions'
-        elif re.search('(^lung[_\s])', roi_name.lower()) is not None:
-            return True, 'Lungs'
-        elif pattern_lungs.search(roi_name):
-            return True, 'Lungs'
-        elif "corpo" in roi_name.lower():
-            return True, 'Body'
-        elif "body" in roi_name.lower():
-            return True, 'Body'
-        elif re.search("^CTV[0-9]{0,1}", roi_name.upper()) is not None:
-            return True, 'Lesions'
-        elif "external" in roi_name.lower():
-            return True, 'Body'
+class ClaroProspective(BaseDataset):
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.instant_ID = None
+        self.CRAs_labels = None
+        self.IDs_labels = None
+        self.ID_to_CRAS_dict = None
+        self.structures_custom = pd.read_excel(os.path.join(self.interim_dir, "structures_name_id_cras_to_check.xlsx")).set_index('id')
+
+    def load_dicom_info_report(self):
+        self.dicom_info = pd.read_excel(os.path.join(self.interim_dir, 'patients_info.xlsx')).set_index('PatientID')
+        self.dicom_info.index = self.dicom_info.index.astype(str)
+        return self
+    def set_instant_ID(self, ID_):
+        self.instant_ID = ID_
+
+    def get_ID_from_CRA(self, ID_):
+        if eval(ID_) in self.IDs_labels:
+            return ID_
+        else:
+            raise Exception(f"Patient {ID_} not found")
+
+    def create_dicom_info_report(self):
+        self.dicom_info = pd.DataFrame(columns=self.dicom_tags + ['#slices', 'PatientID'])
+        cols = self.dicom_info.columns.tolist()
+        cols = cols[-1:] + cols[:-1]
+        self.dicom_info = self.dicom_info[cols]
+        return self
+
+    def add_dicom_infos(self, dicom_files, patient_id):
+        dicom_files.sort()
+        # Read the first DICOM file in the directory and extract the DICOM tags
+
+        ds = pydicom.dcmread(dicom_files[0])
+        data = {
+            tag: getattr(ds, tag, None) for tag in self.dicom_tags
+        }
+
+        id_ = self.get_ID_from_CRA(patient_id)
+
+        data['#slices'] = len(dicom_files)
+        data['PatientID'] = id_
+        assert data['SliceThickness'] >= 1, f'Patient {patient_id} has SliceThickness < 1'
+
+        df_data = pd.DataFrame([data])
+        self.dicom_info = pd.concat([self.dicom_info, df_data], ignore_index=True)
+
+        return data, ds
+
+    def check_stage(self):
+
+        # Select labels
+        if self.labels is not None:
+
+            self.labels.columns = [self.labels.iloc[0, 0], *self.labels.iloc[0, 1:].tolist()]
+            self.labels = self.labels.drop([0, 0]).reset_index(drop=True)
+
+            CRAs_labels_file = pd.read_excel(os.path.join(os.path.dirname(self.label_file), 'ID-CRA.xlsx'))
+
+            self.ID_to_CRAS_dict = {str(ID): CRA for ID, CRA in zip(CRAs_labels_file['ID PAZIENTE'].values, CRAs_labels_file['CRA'].values)}
+
+            CRAs_labels = CRAs_labels_file['CRA'].values
+            IDs_labels = self.labels['ID paziente'].values
+
+            final_id = []
+            for id_, CRA in zip(IDs_labels, CRAs_labels):
+                if CRA in self.patient_ids:
+                    final_id.append(CRA)
+                elif str(id_) in self.patient_ids:
+                    final_id.append(id_)
+                else:
+                    final_id.append(None)
+            final_id = [id_ for id_ in final_id if id_ is not None]
+            ids_ = []
+            id_dirs = []
+            opposite_dirs = []
+            opposite_ids = []
+            for id_dir in self.patient_paths:
+                id = os.path.basename(id_dir)
+                if eval(id) in final_id:
+                    ids_.append(eval(id))
+                    id_dirs.append(id_dir)
+                else:
+                    opposite_dirs.append(id_dir)
+                    opposite_ids.append(id)
+
+            # Update patient_ids and patient_paths
+            self.patient_ids = sorted(ids_, reverse=False)
+            self.patient_paths = id_dirs
+            # Update labels
+            labels_selection = [True if id_ in self.patient_ids or CRA in self.patient_ids else False for id_, CRA in zip(IDs_labels, CRAs_labels)]
+            self.labels = self.labels[labels_selection].reset_index(drop=True)
+            # Add CRAs and IDs as attributes of the class
+            self.CRAs_labels = CRAs_labels[labels_selection]
+
+            self.IDs_labels = self.labels['ID paziente'].values
+
+    def get_patients_directories(self):
+        patient_list_accepted = os.listdir(self.img_raw_dir)
+        self.patient_paths = [os.path.join(self.img_raw_dir, Id) for Id in os.listdir(self.img_raw_dir) if Id in patient_list_accepted and '.' not in Id]
+        self.patient_ids = [os.path.basename(patient_path) for patient_path in self.patient_paths]
+        self.check_stage()
+
+        return self.patient_paths, self.patient_ids
+
+    def load_label(self):
+        if self.label_file is None:
+            self.labels = None
+        else:
+            pass
+            self.labels = pd.read_excel(self.label_file, 'DATI') if self.label_file.endswith('.xlsx') else pd.read_csv(self.label_file, sep=';')
+
+    def get_dicom_files(self, patient_dir, segmentation_load=False):
+        # List all .dcm files in the patient directory
+        CT_files = list()
+
+        if os.path.basename(patient_dir) not in ['CC20015557', '1100069220', '81852614', '81010834', '80077067', '1100115587', '1100181714', '1100212553']:
+            CT_files = glob.glob(os.path.join(patient_dir, 'CT*.dcm'))
+            if segmentation_load:
+                seg_files = glob.glob(os.path.join(patient_dir, 'RS*.dcm'))
+                assert len(seg_files) > 0, "No segmentation file found"
+                return CT_files, patient_dir, seg_files, patient_dir
+            else:
+                return CT_files, patient_dir, None, None
+        else:
+            if 'CC20015557' in os.path.basename(patient_dir):
+                CT_files = glob.glob(os.path.join(patient_dir, 'Polmone', '81852614_CT*'))
+                if segmentation_load:
+                    seg_files = glob.glob(os.path.join(patient_dir, 'Polmone', '*StrctrSets.dcm'))
+                    assert len(seg_files) > 0, "No segmentation file found"
+                    return CT_files, patient_dir, seg_files, patient_dir
+            else:
+                CT_files = glob.glob(os.path.join(patient_dir, '*_CT*.DCM'))
+                if segmentation_load:
+                    seg_files = glob.glob(os.path.join(patient_dir, '*StrctrSets.dcm'))
+                    assert len(seg_files) > 0, "No segmentation file found"
+                    return CT_files, patient_dir, seg_files, patient_dir
+                else:
+                    return CT_files, patient_dir, None, None
+
+    def get_structures_names(self, ds_seg):
+
+        # Initialize structures ROIS names
+        self.initialize_rois()
+        # Available structures
+        finder = ['Lesions' for item in ds_seg.StructureSetROISequence if re.search("^CTV[0-9]{0,1}", item.ROIName.upper()) or 'tumor' in item.ROIName.lower()]
+        self.finder_lesions = finder
+        for item in ds_seg.StructureSetROISequence:
+            name = item.ROIName
+            # Debug ALL SAVED
+
+            """self.structures[item.ROINumber] = name
+            self.rois_classes.append('DEBUG')"""
+            matching, roi_class = self.matching_rois(roi_name=name)
+            assert matching is not None
+            if matching:
+                self.structures[item.ROINumber] = name
+                self.rois_classes.append(roi_class)
+        if len(self.structures) == 0:
+            print("No structures found")
+        else:
+            print("Available structures: ", self.structures)
+        return self
+
+    def create_voxels_by_rois(self, ds_seg, roi_names, slices_dir_patient, number_of_slices=None):
+        self.voxel_by_rois = {name: [] for name in roi_names}
+
+        for roi_name in roi_names:
+            # GET ROIS
+            try:
+                idx = np.where(np.array(util_dicom.get_roi_names(ds_seg)) == roi_name)[0][0]
+
+                # in this way we obtain the contour datasets for the roi_name
+                roi_contour_datasets = util_dicom.get_roi_contour_ds(ds_seg, idx)
+                mask_by_id_dict = util_dicom.create_mask_dict(roi_contour_datasets, slices_dir_patient, dataset=self)
+
+                self.voxel_by_rois[roi_name].append(mask_by_id_dict)
+            except AttributeError as a:
+                print(f"Error in {roi_name}", ' ---ERROR: ', a)
+                continue
+        return self
+
+    def get_IDpatient(self, ds=None, patient_dir=None):
+        id_ = os.path.basename(patient_dir)
+        return self.get_ID_from_CRA(id_)
+
+    def matching_rois(self, roi_name=None):
+
+        pattern_lungs = re.compile('polmoni$', re.IGNORECASE)
+
+        roi_name = roi_name.lower()
+        dict_rois_custom_handmade = eval(self.structures_custom.loc[eval(self.instant_ID),'structures'])
+        if roi_name in [roi.lower() for roi in list(dict_rois_custom_handmade.values())]:
+
+            if "polmone" in roi_name.lower():
+                return True, 'Lungs'
+            elif 'tumor' in roi_name.lower():
+                return True, 'Lesions'
+            elif re.search('(^lung[_\s])', roi_name.lower()) is not None:
+                return True, 'Lungs'
+            elif pattern_lungs.search(roi_name):
+                return True, 'Lungs'
+            elif "corpo" in roi_name.lower():
+                return True, 'Body'
+            elif "body" in roi_name.lower():
+                return True, 'Body'
+            elif re.search("mediastino", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif re.search("parete", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif re.search("ctv", roi_name.lower()) is not None:
+                return True, 'Lesions'
+            elif "external" in roi_name.lower():
+                return True, 'Body'
+            else:
+                return False, None
         else:
             return False, None
 
@@ -436,7 +710,7 @@ class ClaroProspective(BaseDataset):
         slices = []
         for s in os.listdir(slices_dir):
             try:
-                f = dicom.read_file(slices_dir + '/' + s)
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
                 f.ImagePositionPatient  #
                 assert f.Modality != 'RTDOSE'
                 slices.append(f)
@@ -454,7 +728,7 @@ class ClaroProspective(BaseDataset):
         return CT_dir_and_name + img_id + ".dcm"
 
     def set_filename_to_SOP_dict(self, CT_files):
-        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
         self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
 
     def get_SOP_FILENAME(self, img_id):
@@ -546,6 +820,7 @@ class ClaroRetrospective(BaseDataset):
         pattern_lungs = re.compile('polmoni$', re.IGNORECASE)
 
         roi_name = roi_name.lower()
+
         if "polmone" in roi_name.lower():
             return True, 'Lungs'
         if pattern_lungs.search(roi_name):
@@ -556,7 +831,7 @@ class ClaroRetrospective(BaseDataset):
             return True, 'Body'
         elif "body" in roi_name.lower():
             return True, 'Body'
-        elif re.search("^CTV[0-9]{0,1}", roi_name.upper()) is not None:
+        elif re.search("^GTV", roi_name.upper()) is not None:
             return True, 'Lesions'
         elif "external" in roi_name.lower():
             return True, 'Body'
@@ -580,7 +855,7 @@ class ClaroRetrospective(BaseDataset):
         slices = []
         for s in os.listdir(slices_dir):
             try:
-                f = dicom.read_file(slices_dir + '/' + s)
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
                 f.ImagePositionPatient  #
                 assert f.Modality != 'RTDOSE'
                 slices.append(f)
@@ -598,7 +873,7 @@ class ClaroRetrospective(BaseDataset):
         return CT_dir_and_name + img_id + ".dcm"
 
     def set_filename_to_SOP_dict(self, CT_files):
-        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
         self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
 
     def get_SOP_FILENAME(self, img_id):
@@ -615,12 +890,22 @@ class RECO(BaseDataset):
         self.patient_ids = [os.path.basename(patient_path) for patient_path in self.patient_paths]
         return self.patient_paths, self.patient_ids
 
+    def save_clinical(self):
+        self.labels.set_index('Nome paziente').to_csv(os.path.join(self.interim_dir, 'label_data.csv'))
+
     def load_label(self):
         if self.label_file is None:
             self.labels = None
         else:
             self.labels = pd.read_excel(self.label_file) if self.label_file.endswith('.xls') else pd.read_csv(self.label_file, sep=';')
             self.labels.drop(columns=['Unnamed: 0'], inplace=True)
+            self.labels
+
+    def label_change_name_to_ID(self, name, id):
+        self.labels.loc[[name_ == name for name_ in self.labels['Nome paziente'].to_list()], 'Nome paziente'] = id
+
+    def drop_patient(self, patient_name):
+        self.labels = self.labels[self.labels['Nome paziente'] != patient_name]
 
     def get_dicom_files(self, patient_dir, segmentation_load=False):
         # List all .dcm files in the patient directory
@@ -654,14 +939,14 @@ class RECO(BaseDataset):
     def add_dicom_infos(self, dicom_files, patient_id):
 
         dicom_temp = self.dicom_info.copy()
-        data = super().add_dicom_infos(dicom_files, patient_id)
+        data, ds = super().add_dicom_infos(dicom_files, patient_id)
         # Get label
         label = self.labels.loc[self.labels['Nome paziente'] == patient_id, 'Risposta Completa (0 no, 1 si)'].values[0]
 
         data['RC'] = label
         dicom_temp.loc[len(dicom_temp)] = data
         self.dicom_info = dicom_temp.copy()
-        return data
+        return data, ds
 
     def matching_rois(self, roi_name=None):
 
@@ -669,6 +954,7 @@ class RECO(BaseDataset):
         pattern_lungs = re.compile('polmoni$', re.IGNORECASE)
 
         roi_name = roi_name.lower()
+
         if "polmone " in roi_name.lower():
             return True, 'Lungs'
         if pattern_lungs.search(roi_name):
@@ -694,7 +980,7 @@ class RECO(BaseDataset):
         slices = []
         for s in os.listdir(slices_dir):
             try:
-                f = dicom.read_file(slices_dir + '/' + s)
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
                 f.ImagePositionPatient  #
                 assert f.Modality != 'RTDOSE'
                 slices.append(f)
@@ -711,7 +997,7 @@ class RECO(BaseDataset):
         return CT_dir_and_name + img_id + ".dcm"
 
     def set_filename_to_SOP_dict(self, CT_files):
-        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.dcm')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
         self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
 
     def get_SOP_FILENAME(self, img_id):
@@ -727,7 +1013,7 @@ class AERTS(BaseDataset):
         slices = []
         for s in os.listdir(slices_dir):
             try:
-                f = dicom.read_file(slices_dir + '/' + s)
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
                 f.ImagePositionPatient  #
                 assert f.Modality != 'RTDOSE'
                 slices.append((f, s.split('.')[0]))
@@ -806,7 +1092,7 @@ class AERTS(BaseDataset):
             return CT_files, CT_dir, None, None
 
     def set_filename_to_SOP_dict(self, CT_files):
-        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
         self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
 
     def save_clinical(self):
@@ -844,14 +1130,14 @@ class NSCLCRadioGenomics(BaseDataset):
 
         self.dicom_info.loc[len(self.dicom_info)] = data
 
-        return data
+        return data, ds
 
     def get_slices_dict(self, slices_dir):
         if slices_dir[-1] != '/': slices_dir += '/'
         slices = []
         for s in os.listdir(slices_dir):
             try:
-                f = dicom.read_file(slices_dir + '/' + s)
+                f = dicom.read_file(slices_dir + '/' + s, force=True)
                 f.ImagePositionPatient  #
                 assert f.Modality != 'RTDOSE'
                 slices.append((f, s.split('.')[0]))
@@ -862,6 +1148,12 @@ class NSCLCRadioGenomics(BaseDataset):
         return slice_dict
 
     def get_patients_directories(self):
+        """
+        #
+        # get patient directories and patient ids
+        #
+        :return: list of patient directories and list of patient ids
+        """
         dicom_info = self.get_dicom_info()
         patient_list_accepted = self.labels['Case ID'].to_list() if len(dicom_info) == 0 else dicom_info.index.to_list()
 
@@ -933,7 +1225,7 @@ class NSCLCRadioGenomics(BaseDataset):
         for roi_name in roi_names:
             seg = ds_seg.pixel_array
             # reorient the seg array
-            seg = np.fliplr(seg.T)
+            seg = np.transpose(seg, axes=[1, 2, 0])
 
             # get the ReferencedSOPInstanceUID from the RTSTRUCT file
             s = ds_seg.ReferencedSeriesSequence._list
@@ -970,7 +1262,7 @@ class NSCLCRadioGenomics(BaseDataset):
         return coord, img_id
 
     def set_filename_to_SOP_dict(self, CT_files):
-        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.')[0]: dicom.read_file(CT_file).SOPInstanceUID for CT_file in CT_files}
+        self.filename_to_SOP_dict = {os.path.basename(CT_file).split('.')[0]: dicom.read_file(CT_file, force=True).SOPInstanceUID for CT_file in CT_files}
         self.SOP_to_filename_dict = {v: k for k, v in self.filename_to_SOP_dict.items()}
 
     def save_clinical(self):

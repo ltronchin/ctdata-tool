@@ -7,10 +7,10 @@ device:
 
 data:
   dataset_name: RC
-  img_dir: /Volumes/T7/RECO/
-  interim_dir: /Volumes/T7/data/interim/
-  processed_dir: /Volumes/T7/data/processed/
-  label_file: /Volumes/T7/RECO/RC/DATABASEV1.xls
+  img_dir:  /Volumes/PhD backup/RECO/
+  interim_dir:  /Volumes/PhD backup/data/interim/
+  processed_dir:  /Volumes/PhD backup/data/processed/
+  label_file:  /Volumes/PhD backup/RECO/RC/DATABASEV1.xls
   metadata_file: None
   clinical_data:
     information: None

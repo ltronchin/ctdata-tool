@@ -1,0 +1,54 @@
+seed: 0
+exp_name:
+
+device:
+  cuda_device: cuda:0
+  gpu_num_workers: 32
+
+data:
+  dataset_name: AIDA_CT
+  get_segmentation: False
+  img_dir:  /Volumes/T7/IMAGING_IDEA_PICTURE_AIDA/III_stage/diagnosis_imaging/RTCT_Simulation_diagnosis
+  interim_dir:  /Volumes/PhD backup/data/interim/
+  processed_dir:  /Volumes/PhD backup/data/processed/
+  info_file:  /Volumes/PhD backup/data/interim/Claro_Pro/patients_info.xlsx
+  label_file: /Users/filruff/Desktop/PHD/PROGETTI/Multimodal_MARIA_AIDA/data/tabular/survival/AIDA/cross_validation/all_data.xlsx
+  metadata_file: None
+  preprocessing:
+    # resize
+    img_size: 256
+    interpolation: linear
+    # normalization and clip
+    window:
+      center: -350 # -1200 # -1000
+      width: 1500 # 400 # 1000
+    upper_percentile:
+    lower_percentile:
+    to_255: False
+    file_format: .tiff # .pkl
+  dicom_tags:
+    - SliceThickness
+    - RescaleIntercept
+    - RescaleSlope
+    - PixelSpacing
+    - BitsAllocated
+    - BitsStored
+    - PixelRepresentation
+    - ImageOrientationPatient
+    - ImagePositionPatient
+    - ImageType
+    - Manufacturer
+    - ManufacturerModelName
+    - PhotometricInterpretation
+    - WindowCenter
+    - WindowWidth
+  contour:
+    contour_type: None
+    contour_save_format: .nii
+    masks_target: []
+    union_target: []
+
+
+reports:
+  reports_dir: "./reports/"
+  snap: True

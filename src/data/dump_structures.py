@@ -54,17 +54,21 @@ if __name__ == '__main__':
                 # Select name from label file
                 dicom_files, CT_scan_dir, seg_files, RTSTRUCT_dir = Dataset_class.get_dicom_files(patient_dir, segmentation_load=True)
 
-                ds_seg = pydicom.dcmread(seg_files[0])
+                ds_seg = pydicom.dcmread(seg_files[0], force=True if 'StrctrSets.dcm' in seg_files[0] else False)
 
-                if  'CC19004775' in patient_dir or 'CC18047936' in patient_dir:
-                    pass
                 # Get structures
+                patient_fname = getattr(ds_seg, 'PatientID', None)
+                print(f"Patient ID: {patient_fname}")
+                # TODO add patient_fname to the dataset Labels and remove patient names
                 structures, rois_classes = Dataset_class.get_structures_names(ds_seg).get_structures_and_classes()
 
+
+                # Add data structures
+                Dataset_class.label_change_name_to_ID(name=os.path.basename(patient_dir), id=patient_fname)
                 Dataset_class.add_data_structures(patient_dir=patient_dir, structures=structures, rois_classes=rois_classes)
-                if  'CC19004775' in patient_dir or 'CC18047936' in patient_dir:
-                    pass
+
             except Exception as e:
+                Dataset_class.drop_patient(os.path.basename(patient_dir))
                 print(e)
     # Create Save
     Dataset_class.create_save_structures_report()
